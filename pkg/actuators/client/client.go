@@ -24,12 +24,10 @@ import (
 	"github.com/IBM/vpc-go-sdk/vpcv1"
 	"github.com/golang-jwt/jwt"
 	"github.com/openshift/machine-api-operator/pkg/controller/machine"
-	ibmcloudproviderv1 "github.com/openshift/machine-api-provider-ibmcloud/pkg/apis/ibmcloudprovider/v1"
-	"github.com/pkg/errors"
-)
 
-// instance not found error
-var errInstanceNotFound = errors.New("instance not found")
+	ibmcloudclienterrors "github.com/openshift/machine-api-provider-ibmcloud/pkg/actuators/client/errors"
+	ibmcloudproviderv1 "github.com/openshift/machine-api-provider-ibmcloud/pkg/apis/ibmcloudprovider/v1"
+)
 
 // Client is a wrapper object for IBM SDK clients
 type Client interface {
@@ -146,7 +144,7 @@ func (c *ibmCloudClient) InstanceExistsByName(name string, machineProviderConfig
 	}
 
 	// Instance not found
-	if errors.Is(err, errInstanceNotFound) {
+	if _, okay := err.(*ibmcloudclienterrors.InstanceNotFoundError); okay {
 		return false, nil
 	}
 
@@ -213,7 +211,7 @@ func (c *ibmCloudClient) InstanceGetByName(name string, machineProviderConfig *i
 	}
 
 	// Not found
-	return nil, errInstanceNotFound
+	return nil, new(ibmcloudclienterrors.InstanceNotFoundError)
 }
 
 // InstanceGetByID retrieves a single instance specified by instanceID
