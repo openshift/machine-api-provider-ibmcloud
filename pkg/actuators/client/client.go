@@ -262,6 +262,18 @@ func (c *ibmCloudClient) InstanceCreate(machineName string, machineProviderConfi
 		return nil, err
 	}
 
+	// If NetworkResourceGroup exists, get the Network Resource Group ID
+	// Otherwise, default to Resource Group ID
+	var networkResourceGroupID string
+	if machineProviderConfig.NetworkResourceGroup != "" {
+		networkResourceGroupID, err = c.GetResourceGroupIDByName(machineProviderConfig.NetworkResourceGroup)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		networkResourceGroupID = resourceGroupID
+	}
+
 	// Get Custom Image ID
 	imageID, err := c.GetCustomImageByName(machineProviderConfig.Image, resourceGroupID)
 	if err != nil {
@@ -276,14 +288,14 @@ func (c *ibmCloudClient) InstanceCreate(machineName string, machineProviderConfi
 
 	// Get VPC ID
 	vpcName := machineProviderConfig.VPC
-	vpcID, err := c.GetVPCIDByName(vpcName, resourceGroupID)
+	vpcID, err := c.GetVPCIDByName(vpcName, networkResourceGroupID)
 	if err != nil {
 		return nil, err
 	}
 
 	// Get Subnet ID
 	subnetName := machineProviderConfig.PrimaryNetworkInterface.Subnet
-	subnetID, err := c.GetSubnetIDbyName(subnetName, resourceGroupID)
+	subnetID, err := c.GetSubnetIDbyName(subnetName, networkResourceGroupID)
 	if err != nil {
 		return nil, err
 	}
