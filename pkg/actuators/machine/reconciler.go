@@ -48,10 +48,6 @@ const (
 	// Time in minutes a Provisioned machine has before a delete is called to force re-create
 	machineReplaceDeadlineMinutes = 15
 	machineDeleteDeadlineMinutes  = 10
-	// Phases of machines are private from MAO, followup on making them public to share
-	phaseFailed       = "Failed"
-	phaseProvisioning = "Provisioning"
-	phaseProvisioned  = "Provisioned"
 	// Status of IBM Cloud instances
 	ibmStatusRunning  = "running"
 	ibmStatusDeleting = "deleting"
@@ -207,7 +203,7 @@ func (r *Reconciler) reconcileMachineWithCloudState(conditionFailed *ibmcloudpro
 				return fmt.Errorf("machine %s name for replaced machine doesn't match expected %s for instance id: %s", *invalidInstance.Name, r.machine.Name, *r.providerStatus.InstanceID)
 			}
 			klog.Infof("%s: setting machine's status to Provisioning for replacement machine", r.machine.Name)
-			r.machine.Status.Phase = pointer.String(phaseProvisioning)
+			r.machine.Status.Phase = pointer.String(machinev1.PhaseProvisioning)
 			return nil
 		}
 		return fmt.Errorf("get instance failed with an error: %q", err)
@@ -229,8 +225,8 @@ func (r *Reconciler) reconcileMachineWithCloudState(conditionFailed *ibmcloudpro
 			} else if machineReplacementCondition.Reason == ibmcloudproviderv1.MachineReplacementFailed {
 				// If replacement failed, attempt to update the status to Failed, if not already done
 				klog.Infof("%s: machine replacement failed", r.machine.Name)
-				if r.machine.Status.Phase != nil && *r.machine.Status.Phase != phaseFailed {
-					r.machine.Status.Phase = pointer.String(phaseFailed)
+				if r.machine.Status.Phase != nil && *r.machine.Status.Phase != machinev1.PhaseFailed {
+					r.machine.Status.Phase = pointer.String(machinev1.PhaseFailed)
 					return nil
 				}
 			}
@@ -259,7 +255,7 @@ func (r *Reconciler) reconcileMachineWithCloudState(conditionFailed *ibmcloudpro
 	// Check whether the machine remains in Provisioned state but not Running for more than 'machineReplaceDeadlineMinutes'
 	// Attempt to mitigate https://issues.redhat.com/browse/OCPBUGS-1327
 	// Bypass check if machine statuses do not match this expected case
-	if newInstance.Status != nil && *newInstance.Status == ibmStatusRunning && r.machine.Status.Phase != nil && *r.machine.Status.Phase == phaseProvisioned {
+	if newInstance.Status != nil && *newInstance.Status == ibmStatusRunning && r.machine.Status.Phase != nil && *r.machine.Status.Phase == machinev1.PhaseProvisioned {
 		// Check whether a machine replacement condition already exists
 		if machineReplacementCondition := conditionTypeCheck(r.providerStatus.Conditions, ibmcloudproviderv1.MachineReplacement); machineReplacementCondition != nil {
 			// If the replacement condition is already in progress or completed or failed, we will not make a second replacement attempt, only if one was requested by machine isn't deleted (failed API delete call)
