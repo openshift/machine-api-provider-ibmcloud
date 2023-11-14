@@ -23,10 +23,15 @@ import (
 	"github.com/IBM/platform-services-go-sdk/resourcemanagerv2"
 	"github.com/IBM/vpc-go-sdk/vpcv1"
 	"github.com/golang-jwt/jwt"
+	configv1 "github.com/openshift/api/config/v1"
 	"github.com/openshift/machine-api-operator/pkg/controller/machine"
+	klog "k8s.io/klog/v2"
 
 	ibmcloudclienterrors "github.com/openshift/machine-api-provider-ibmcloud/pkg/actuators/client/errors"
+	ibmcloudutil "github.com/openshift/machine-api-provider-ibmcloud/pkg/actuators/util"
 	ibmcloudproviderv1 "github.com/openshift/machine-api-provider-ibmcloud/pkg/apis/ibmcloudprovider/v1"
+
+	coreClient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 // Client is a wrapper object for IBM SDK clients
@@ -58,14 +63,42 @@ type ibmCloudClient struct {
 }
 
 // IbmcloudClientBuilderFuncType is function type for building ibm cloud client
-type IbmcloudClientBuilderFuncType func(credentialVal string, providerSpec ibmcloudproviderv1.IBMCloudMachineProviderSpec) (Client, error)
+type IbmcloudClientBuilderFuncType func(client coreClient.Client, credentialVal string, providerSpec ibmcloudproviderv1.IBMCloudMachineProviderSpec) (Client, error)
 
 // NewClient initilizes a new validated client
-func NewClient(credentialVal string, providerSpec ibmcloudproviderv1.IBMCloudMachineProviderSpec) (Client, error) {
+func NewClient(client coreClient.Client, credentialVal string, providerSpec ibmcloudproviderv1.IBMCloudMachineProviderSpec) (Client, error) {
+	// Get the Infrastructure config to vet for any IBM Cloud Service endpoint overrides
+	infraConfig, err := ibmcloudutil.GetInfrastructureConfig(client)
+	if err != nil {
+		return nil, err
+	}
+
+	var iamEndpointOverride, rmEndpointOverride, vpcEndpointOverride string
+	// If there are any Service endpoint overrides, attempt to load those required for this component
+	if infraConfig.Status.PlatformStatus != nil && infraConfig.Status.PlatformStatus.IBMCloud != nil && infraConfig.Status.PlatformStatus.IBMCloud.ServiceEndpoints != nil {
+		for _, endpoint := range infraConfig.Status.PlatformStatus.IBMCloud.ServiceEndpoints {
+			switch endpoint.Name {
+			case configv1.IBMCloudServiceIAM:
+				iamEndpointOverride = endpoint.URL
+			case configv1.IBMCloudServiceResourceManager:
+				rmEndpointOverride = endpoint.URL
+			case configv1.IBMCloudServiceVPC:
+				vpcEndpointOverride = endpoint.URL
+			default:
+				klog.Infof("ignoring unused service endpoint: %s", endpoint.Name)
+			}
+		}
+	}
 
 	// Authenticator
 	authenticator := &core.IamAuthenticator{
 		ApiKey: credentialVal,
+	}
+
+	// If an endpoint override for IAM was in Infrastructure, set it now
+	if iamEndpointOverride != "" {
+		authenticator.URL = iamEndpointOverride
+		klog.Infof("override %s endpoint: %s", configv1.IBMCloudServiceIAM, iamEndpointOverride)
 	}
 
 	// Retrieve IAM Token
@@ -98,32 +131,51 @@ func NewClient(credentialVal string, providerSpec ibmcloudproviderv1.IBMCloudMac
 	}
 
 	// IC Virtual Private Cloud (VPC) API
-	vpcService, err := vpcv1.NewVpcV1(&vpcv1.VpcV1Options{
+	vpcOptions := &vpcv1.VpcV1Options{
 		Authenticator: authenticator,
-	})
+	}
+
+	// If an endpoint override for VPC was in Infrastructure, set it now
+	if vpcEndpointOverride != "" {
+		vpcOptions.URL = vpcEndpointOverride
+		klog.Infof("override %s endpoint: %s", configv1.IBMCloudServiceVPC, vpcEndpointOverride)
+	}
+
+	vpcService, err := vpcv1.NewVpcV1(vpcOptions)
 	if err != nil {
 		return nil, err
 	}
 
 	// IC Resource Manager API
-	resourceManagerService, err := resourcemanagerv2.NewResourceManagerV2(&resourcemanagerv2.ResourceManagerV2Options{
+	rmOptions := &resourcemanagerv2.ResourceManagerV2Options{
 		Authenticator: authenticator,
-	})
+	}
+
+	// If an endpoint override for ResourceManager was in Infrastructure, set it now
+	if rmEndpointOverride != "" {
+		rmOptions.URL = rmEndpointOverride
+		klog.Infof("override %s endpoint: %s", configv1.IBMCloudServiceResourceManager, rmEndpointOverride)
+	}
+
+	resourceManagerService, err := resourcemanagerv2.NewResourceManagerV2(rmOptions)
 	if err != nil {
 		return nil, err
 	}
 
-	// Get Region and Set Service URL
-	regionName := providerSpec.Region
-	region, _, err := vpcService.GetRegion(vpcService.NewGetRegionOptions(regionName))
-	if err != nil {
-		return nil, err
-	}
+	// Setup VPC endpoint if an override wasn't provided
+	if vpcEndpointOverride == "" {
+		// Get Region and Set Service URL
+		regionName := providerSpec.Region
+		region, _, err := vpcService.GetRegion(vpcService.NewGetRegionOptions(regionName))
+		if err != nil {
+			return nil, err
+		}
 
-	// Set the Service URL
-	err = vpcService.SetServiceURL(fmt.Sprintf("%s/v1", *region.Endpoint))
-	if err != nil {
-		return nil, err
+		// Set the Service URL
+		err = vpcService.SetServiceURL(fmt.Sprintf("%s/v1", *region.Endpoint))
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	return &ibmCloudClient{
@@ -448,7 +500,7 @@ func (c *ibmCloudClient) GetResourceGroupIDByName(resourceGroupName string) (str
 	// Get Resource Group
 	resourceGroup, _, err := c.resourceManagerService.ListResourceGroups(resourceGroupOptions)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to list resource groups: %w", err)
 	}
 
 	// Check resourceGroup is not nil and Resources[] is not empty
