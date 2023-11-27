@@ -85,8 +85,7 @@ unit: # Run unit test
 
 .PHONY: build
 build: ## build binaries
-	$(DOCKER_CMD) go build $(GOGCFLAGS) -o "bin/machine-controller-manager" \
-               -ldflags "$(LD_FLAGS)" "$(REPO_PATH)/cmd/manager"
+	./hack/build-go.sh
 
 .PHONY: images
 images: ## Create images
