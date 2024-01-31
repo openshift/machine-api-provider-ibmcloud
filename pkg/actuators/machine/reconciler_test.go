@@ -142,7 +142,10 @@ func TestCreate(t *testing.T) {
 			reconciler := newReconciler(machineScope)
 
 			if tc.secret != nil {
-				reconciler.client = controllerfake.NewFakeClientWithScheme(scheme.Scheme, tc.secret)
+				reconciler.client = controllerfake.NewClientBuilder().
+					WithScheme(scheme.Scheme).
+					WithObjects(tc.secret).
+					Build()
 			}
 
 			err = reconciler.create()

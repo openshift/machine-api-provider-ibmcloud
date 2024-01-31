@@ -30,12 +30,14 @@ import (
 	"github.com/openshift/machine-api-provider-ibmcloud/pkg/apis"
 	"github.com/openshift/machine-api-provider-ibmcloud/pkg/version"
 	klog "k8s.io/klog/v2"
-	"k8s.io/klog/v2/klogr"
+	"k8s.io/klog/v2/textlogger"
 	ctrl "sigs.k8s.io/controller-runtime"
+	crcache "sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
+	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 )
 
 // The default durations for the leader electrion operations.
@@ -103,15 +105,19 @@ func main() {
 		LeaderElectionID:        "machine-api-provider-ibmcloud-leader",
 		LeaseDuration:           leaderElectLeaseDuration,
 		HealthProbeBindAddress:  *healthAddr,
-		MetricsBindAddress:      *metricsAddress,
+		Metrics: metricsserver.Options{
+			BindAddress: *metricsAddress,
+		},
 		// Slow the default retry and renew election rate to reduce etcd writes at idle: BZ 1858400
 		RetryPeriod:   &retryPeriod,
 		RenewDeadline: &renewDealine,
 	}
 
 	if *watchNamespace != "" {
-		opts.Namespace = *watchNamespace
-		klog.Infof("Watching machine-api objects only in namespace %q for reconciliation.", opts.Namespace)
+		opts.Cache.DefaultNamespaces = map[string]crcache.Config{
+			*watchNamespace: {},
+		}
+		klog.Infof("Watching machine-api objects only in namespace %q for reconciliation.", *watchNamespace)
 	}
 
 	// Setup a Manager
@@ -144,7 +150,7 @@ func main() {
 		klog.Fatal(err)
 	}
 
-	ctrl.SetLogger(klogr.New())
+	ctrl.SetLogger(textlogger.NewLogger(nil))
 	setupLog := ctrl.Log.WithName("setup")
 	if err = (&machinesetcontroller.Reconciler{
 		Client: mgr.GetClient(),

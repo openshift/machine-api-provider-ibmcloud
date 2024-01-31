@@ -41,6 +41,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
+	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 )
 
 func init() {
@@ -71,9 +72,12 @@ func TestActuatorEvents(t *testing.T) {
 		g.Expect(testEnv.Stop()).To(Succeed())
 	}()
 
+	metricsAddress := "0"
 	mgr, err := manager.New(cfg, manager.Options{
-		Scheme:             scheme.Scheme,
-		MetricsBindAddress: "0",
+		Scheme: scheme.Scheme,
+		Metrics: metricsserver.Options{
+			BindAddress: metricsAddress,
+		},
 	})
 	if err != nil {
 		t.Fatal(err)
