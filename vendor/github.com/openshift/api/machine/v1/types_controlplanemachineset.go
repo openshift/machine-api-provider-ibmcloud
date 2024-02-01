@@ -231,10 +231,11 @@ const (
 // +kubebuilder:validation:XValidation:rule="has(self.platform) && self.platform == 'Azure' ?  has(self.azure) : !has(self.azure)",message="azure configuration is required when platform is Azure, and forbidden otherwise"
 // +kubebuilder:validation:XValidation:rule="has(self.platform) && self.platform == 'GCP' ?  has(self.gcp) : !has(self.gcp)",message="gcp configuration is required when platform is GCP, and forbidden otherwise"
 // +kubebuilder:validation:XValidation:rule="has(self.platform) && self.platform == 'OpenStack' ?  has(self.openstack) : !has(self.openstack)",message="openstack configuration is required when platform is OpenStack, and forbidden otherwise"
-// +openshift:validation:FeatureSetAwareXValidation:featureSet=CustomNoUpgrade;TechPreviewNoUpgrade,rule="has(self.platform) && self.platform == 'VSphere' ?  has(self.vsphere) : !has(self.vsphere)",message="vsphere configuration is required when platform is VSphere, and forbidden otherwise"
+// +kubebuilder:validation:XValidation:rule="has(self.platform) && self.platform == 'VSphere' ?  has(self.vsphere) : !has(self.vsphere)",message="vsphere configuration is required when platform is VSphere, and forbidden otherwise"
+// +kubebuilder:validation:XValidation:rule="has(self.platform) && self.platform == 'Nutanix' ?  has(self.nutanix) : !has(self.nutanix)",message="nutanix configuration is required when platform is Nutanix, and forbidden otherwise"
 type FailureDomains struct {
 	// Platform identifies the platform for which the FailureDomain represents.
-	// Currently supported values are AWS, Azure, GCP, OpenStack, and VSphere.
+	// Currently supported values are AWS, Azure, GCP, OpenStack, VSphere and Nutanix.
 	// +unionDiscriminator
 	// +kubebuilder:validation:Required
 	Platform configv1.PlatformType `json:"platform"`
@@ -252,8 +253,9 @@ type FailureDomains struct {
 	GCP *[]GCPFailureDomain `json:"gcp,omitempty"`
 
 	// vsphere configures failure domain information for the VSphere platform.
+	// +listType=map
+	// +listMapKey=name
 	// +optional
-	// +openshift:enable:FeatureSets=CustomNoUpgrade;TechPreviewNoUpgrade
 	VSphere []VSphereFailureDomain `json:"vsphere,omitempty"`
 
 	// OpenStack configures failure domain information for the OpenStack platform.
@@ -266,6 +268,12 @@ type FailureDomains struct {
 	// + of nil if it would be a pointer.
 	// +optional
 	OpenStack []OpenStackFailureDomain `json:"openstack,omitempty"`
+
+	// nutanix configures failure domain information for the Nutanix platform.
+	// +listType=map
+	// +listMapKey=name
+	// +optional
+	Nutanix []NutanixFailureDomainReference `json:"nutanix,omitempty"`
 }
 
 // AWSFailureDomain configures failure domain information for the AWS platform.
@@ -343,6 +351,17 @@ type OpenStackFailureDomain struct {
 	// + If it were a reference then omitempty doesn't work and the minProperties validations are no longer valid.
 	// +optional
 	RootVolume *RootVolume `json:"rootVolume,omitempty"`
+}
+
+// NutanixFailureDomainReference refers to the failure domain of the Nutanix platform.
+type NutanixFailureDomainReference struct {
+	// name of the failure domain in which the nutanix machine provider will create the VM.
+	// Failure domains are defined in a cluster's config.openshift.io/Infrastructure resource.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=64
+	// +kubebuilder:validation:Pattern=`[a-z0-9]([-a-z0-9]*[a-z0-9])?`
+	Name string `json:"name"`
 }
 
 // RootVolume represents the volume metadata to boot from.

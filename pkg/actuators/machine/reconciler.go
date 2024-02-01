@@ -31,7 +31,7 @@ import (
 	apicorev1 "k8s.io/api/core/v1"
 	apimachineryerrors "k8s.io/apimachinery/pkg/api/errors"
 	klog "k8s.io/klog/v2"
-	"k8s.io/utils/pointer"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	ibmcloudclienterrors "github.com/openshift/machine-api-provider-ibmcloud/pkg/actuators/client/errors"
@@ -83,7 +83,7 @@ func (r *Reconciler) create() error {
 	_, err = r.ibmClient.InstanceCreate(r.machine.Name, r.providerSpec, userData)
 
 	if err != nil {
-		klog.Errorf("%s: error occured while creating machine: %w", r.machine.Name, err)
+		klog.Errorf("%s: error occured while creating machine: %v", r.machine.Name, err)
 		metrics.RegisterFailedInstanceCreate(&metrics.MachineLabels{
 			Name:      r.machine.Name,
 			Namespace: r.machine.Namespace,
@@ -203,7 +203,7 @@ func (r *Reconciler) reconcileMachineWithCloudState(conditionFailed *ibmcloudpro
 				return fmt.Errorf("machine %s name for replaced machine doesn't match expected %s for instance id: %s", *invalidInstance.Name, r.machine.Name, *r.providerStatus.InstanceID)
 			}
 			klog.Infof("%s: setting machine's status to Provisioning for replacement machine", r.machine.Name)
-			r.machine.Status.Phase = pointer.String(machinev1.PhaseProvisioning)
+			r.machine.Status.Phase = ptr.To(machinev1.PhaseProvisioning)
 			return nil
 		}
 		return fmt.Errorf("get instance failed with an error: %q", err)
@@ -226,7 +226,7 @@ func (r *Reconciler) reconcileMachineWithCloudState(conditionFailed *ibmcloudpro
 				// If replacement failed, attempt to update the status to Failed, if not already done
 				klog.Infof("%s: machine replacement failed", r.machine.Name)
 				if r.machine.Status.Phase != nil && *r.machine.Status.Phase != machinev1.PhaseFailed {
-					r.machine.Status.Phase = pointer.String(machinev1.PhaseFailed)
+					r.machine.Status.Phase = ptr.To(machinev1.PhaseFailed)
 					return nil
 				}
 			}
@@ -371,12 +371,12 @@ func (r *Reconciler) reconcileMachineWithCloudState(conditionFailed *ibmcloudpro
 func (r *Reconciler) checkMachineDeadline(deadline time.Duration, startTimeRaw string) (bool, error) {
 	userData, err := r.getUserData()
 	if err != nil {
-		klog.Warningf("%s: failure collecting user data: %w", r.machine.Name, err)
+		klog.Warningf("%s: failure collecting user data: %v", r.machine.Name, err)
 		return false, err
 	}
 	var ignitionConfig igntypes.Config
 	if err := json.Unmarshal([]byte(userData), &ignitionConfig); err != nil {
-		klog.Warningf("%s: failure attempting to unmarshal UserData: %w", r.machine.Name, err)
+		klog.Warningf("%s: failure attempting to unmarshal UserData: %v", r.machine.Name, err)
 		return false, err
 	}
 
