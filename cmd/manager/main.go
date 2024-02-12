@@ -90,9 +90,20 @@ func main() {
 		"Address for hosting metrics",
 	)
 
-	klog.InitFlags(nil)
-	flag.Set("logtostderr", "true")
+	logToStderr := flag.Bool(
+		"logtostderr",
+		true,
+		"Log to Stderr instead of files",
+	)
+
+	textLoggerConfig := textlogger.NewConfig()
+	textLoggerConfig.AddFlags(flag.CommandLine)
+	ctrl.SetLogger(textlogger.NewLogger(textLoggerConfig))
+
 	flag.Parse()
+	if logToStderr != nil {
+		klog.LogToStderr(*logToStderr)
+	}
 
 	if *printVersion {
 		fmt.Println(version.String)
@@ -150,7 +161,6 @@ func main() {
 		klog.Fatal(err)
 	}
 
-	ctrl.SetLogger(textlogger.NewLogger(nil))
 	setupLog := ctrl.Log.WithName("setup")
 	if err = (&machinesetcontroller.Reconciler{
 		Client: mgr.GetClient(),
