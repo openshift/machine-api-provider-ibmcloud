@@ -1,6 +1,6 @@
 module github.com/openshift/machine-api-provider-ibmcloud
 
-go 1.21
+go 1.22
 
 require (
 	github.com/IBM/go-sdk-core/v5 v5.14.1
