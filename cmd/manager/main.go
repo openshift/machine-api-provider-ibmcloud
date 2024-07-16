@@ -29,6 +29,7 @@ import (
 	machinesetcontroller "github.com/openshift/machine-api-provider-ibmcloud/pkg/actuators/machineset"
 	"github.com/openshift/machine-api-provider-ibmcloud/pkg/apis"
 	"github.com/openshift/machine-api-provider-ibmcloud/pkg/version"
+	k8sflag "k8s.io/component-base/cli/flag"
 	klog "k8s.io/klog/v2"
 	"k8s.io/klog/v2/textlogger"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -95,6 +96,9 @@ func main() {
 		true,
 		"Log to Stderr instead of files",
 	)
+
+	featureGateArgs := map[string]bool{}
+	flag.Var(k8sflag.NewMapStringBool(&featureGateArgs), "feature-gates", "A set of key=value pairs that describe feature gates for alpha/experimen")
 
 	textLoggerConfig := textlogger.NewConfig()
 	textLoggerConfig.AddFlags(flag.CommandLine)
