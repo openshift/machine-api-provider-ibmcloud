@@ -16,7 +16,7 @@ require (
 	github.com/onsi/ginkgo/v2 v2.17.1
 	github.com/onsi/gomega v1.32.0
 	github.com/openshift/api v0.0.0-20240731195412-e863d9f8a215
-	github.com/openshift/library-go v0.0.0-20240723172506-8bb8fe6cc56d
+	github.com/openshift/library-go v0.0.0-20240822162747-42bcbbc4ccc6
 	github.com/openshift/machine-api-operator v0.2.1-0.20240820150322-d0e62ca300b5
 	k8s.io/api v0.30.1
 	k8s.io/apimachinery v0.30.1
@@ -134,5 +134,3 @@ require (
 	sigs.k8s.io/kustomize/kyaml v0.14.3 // indirect
 	sigs.k8s.io/structured-merge-diff/v4 v4.4.1 // indirect
 )
-
-replace github.com/openshift/library-go => github.com/theobarberbany/library-go v0.0.0-20240815110132-fdd86642259a

@@ -301,6 +301,8 @@ github.com/openshift/api v0.0.0-20240731195412-e863d9f8a215 h1:NY9X6aNRa3PKTRj9n
 github.com/openshift/api v0.0.0-20240731195412-e863d9f8a215/go.mod h1:OOh6Qopf21pSzqNVCB5gomomBXb8o5sGKZxG2KNpaXM=
 github.com/openshift/client-go v0.0.0-20240528061634-b054aa794d87 h1:JtLhaGpSEconE+1IKmIgCOof/Len5ceG6H1pk43yv5U=
 github.com/openshift/client-go v0.0.0-20240528061634-b054aa794d87/go.mod h1:3IPD4U0qyovZS4EFady2kqY32m8lGcbs/Wx+yprg9z8=
+github.com/openshift/library-go v0.0.0-20240822162747-42bcbbc4ccc6 h1:SXoVbgBF/K2BadaF+e0ubOkyFDlu+/MwRZ/BhifoQE4=
+github.com/openshift/library-go v0.0.0-20240822162747-42bcbbc4ccc6/go.mod h1:PdASVamWinll2BPxiUpXajTwZxV8A1pQbWEsCN1od7I=
 github.com/openshift/machine-api-operator v0.2.1-0.20240820150322-d0e62ca300b5 h1:3mZLWK2nvvaWZGsoK/Ph7VJR4VaIM9gBBbTPvf987q8=
 github.com/openshift/machine-api-operator v0.2.1-0.20240820150322-d0e62ca300b5/go.mod h1:ntS+1b2WpwGffLBuV8rS2zSndDIDtTPZcaBONrkaqrM=
 github.com/peterbourgon/diskv v2.0.1+incompatible h1:UBdAOUP5p4RWqPBg048CAvpKN+vxiaj6gdUUzhl4XmI=
@@ -350,8 +352,6 @@ github.com/stretchr/testify v1.8.1/go.mod h1:w2LPCIKwWwSfY2zedu0+kehJoqGctiVI29o
 github.com/stretchr/testify v1.8.2/go.mod h1:w2LPCIKwWwSfY2zedu0+kehJoqGctiVI29o6fzry7u4=
 github.com/stretchr/testify v1.9.0 h1:HtqpIVDClZ4nwg75+f6Lvsy/wHu+3BoSGCbBAcpTsTg=
 github.com/stretchr/testify v1.9.0/go.mod h1:r2ic/lqez/lEtzL7wO/rwa5dbSLXVDPFyf8C91i36aY=
-github.com/theobarberbany/library-go v0.0.0-20240815110132-fdd86642259a h1:lPmlp3TB+H9w9jS33V7nvO2sANf5zvOZ4NlxfAjPyZY=
-github.com/theobarberbany/library-go v0.0.0-20240815110132-fdd86642259a/go.mod h1:PdASVamWinll2BPxiUpXajTwZxV8A1pQbWEsCN1od7I=
 github.com/tidwall/pretty v1.0.0 h1:HsD+QiTn7sK6flMKIvNmpqz1qrpP3Ps6jOKIKMooyg4=
 github.com/tidwall/pretty v1.0.0/go.mod h1:XNkn88O1ChpSDQmQeStsy+sBenx6DDtFZJxhVysOjyk=
 github.com/vincent-petithory/dataurl v1.0.0 h1:cXw+kPto8NLuJtlMsI152irrVw9fRDX8AbShPRpg2CI=
