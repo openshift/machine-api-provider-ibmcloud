@@ -18,10 +18,13 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	configv1 "github.com/openshift/api/config/v1"
+	apifeatures "github.com/openshift/api/features"
 	machinev1 "github.com/openshift/api/machine/v1beta1"
+	"github.com/openshift/library-go/pkg/features"
 	capimachine "github.com/openshift/machine-api-operator/pkg/controller/machine"
 	"github.com/openshift/machine-api-operator/pkg/metrics"
 	ibmclient "github.com/openshift/machine-api-provider-ibmcloud/pkg/actuators/client"
@@ -29,7 +32,8 @@ import (
 	machinesetcontroller "github.com/openshift/machine-api-provider-ibmcloud/pkg/actuators/machineset"
 	"github.com/openshift/machine-api-provider-ibmcloud/pkg/apis"
 	"github.com/openshift/machine-api-provider-ibmcloud/pkg/version"
-	k8sflag "k8s.io/component-base/cli/flag"
+	"k8s.io/apiserver/pkg/util/feature"
+	"k8s.io/component-base/featuregate"
 	klog "k8s.io/klog/v2"
 	"k8s.io/klog/v2/textlogger"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -96,9 +100,14 @@ func main() {
 		true,
 		"Log to Stderr instead of files",
 	)
-
-	featureGateArgs := map[string]bool{}
-	flag.Var(k8sflag.NewMapStringBool(&featureGateArgs), "feature-gates", "A set of key=value pairs that describe feature gates for alpha/experimen")
+	// Sets up feature gates
+	defaultMutableGate := feature.DefaultMutableFeatureGate
+	gateOpts, err := features.NewFeatureGateOptions(defaultMutableGate, apifeatures.SelfManaged, apifeatures.FeatureGateMachineAPIMigration)
+	if err != nil {
+		klog.Fatalf("Error setting up feature gates: %v", err)
+	}
+	// Add the --feature-gates flag
+	gateOpts.AddFlagsToGoFlagSet(nil)
 
 	textLoggerConfig := textlogger.NewConfig()
 	textLoggerConfig.AddFlags(flag.CommandLine)
@@ -141,6 +150,18 @@ func main() {
 		klog.Fatalf("Failed to set up overall controller manager: %v", err)
 	}
 
+	// Sets feature gates from flags
+	klog.Infof("Initializing feature gates: %s", strings.Join(defaultMutableGate.KnownFeatures(), ", "))
+	warnings, err := gateOpts.ApplyTo(defaultMutableGate)
+	if err != nil {
+		klog.Fatalf("Error setting feature gates from flags: %v", err)
+	}
+	if len(warnings) > 0 {
+		klog.Infof("Warnings setting feature gates from flags: %v", warnings)
+	}
+
+	klog.Infof("FeatureGateMachineAPIMigration initialised: %t", defaultMutableGate.Enabled(featuregate.Feature(apifeatures.FeatureGateMachineAPIMigration)))
+
 	// Initialize machine actuator.
 	machineActuator := machine.NewActuator(machine.ActuatorParams{
 		Client:           mgr.GetClient(),
@@ -161,7 +182,7 @@ func main() {
 		klog.Fatal(err)
 	}
 
-	if err := capimachine.AddWithActuator(mgr, machineActuator); err != nil {
+	if err := capimachine.AddWithActuator(mgr, machineActuator, defaultMutableGate); err != nil {
 		klog.Fatal(err)
 	}
 

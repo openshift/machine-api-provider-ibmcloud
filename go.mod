@@ -15,10 +15,12 @@ require (
 	github.com/golang/mock v1.6.0
 	github.com/onsi/ginkgo/v2 v2.17.1
 	github.com/onsi/gomega v1.32.0
-	github.com/openshift/api v0.0.0-20240530053948-b01900f1982a
-	github.com/openshift/machine-api-operator v0.2.1-0.20240606171151-148e5dc759a6
+	github.com/openshift/api v0.0.0-20240731195412-e863d9f8a215
+	github.com/openshift/library-go v0.0.0-20240822162747-42bcbbc4ccc6
+	github.com/openshift/machine-api-operator v0.2.1-0.20240820150322-d0e62ca300b5
 	k8s.io/api v0.30.1
 	k8s.io/apimachinery v0.30.1
+	k8s.io/apiserver v0.30.1
 	k8s.io/client-go v0.30.1
 	k8s.io/component-base v0.30.1
 	k8s.io/klog/v2 v2.120.1
@@ -33,6 +35,7 @@ require (
 	github.com/MakeNowJust/heredoc v1.0.0 // indirect
 	github.com/asaskevich/govalidator v0.0.0-20230301143203-a9d515a09cc2 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
+	github.com/blang/semver/v4 v4.0.0 // indirect
 	github.com/cespare/xxhash/v2 v2.2.0 // indirect
 	github.com/chai2010/gettext-go v1.0.2 // indirect
 	github.com/coreos/go-semver v0.3.1 // indirect
@@ -92,7 +95,6 @@ require (
 	github.com/mxk/go-flowrate v0.0.0-20140419014527-cca7078d478f // indirect
 	github.com/oklog/ulid v1.3.1 // indirect
 	github.com/openshift/client-go v0.0.0-20240528061634-b054aa794d87 // indirect
-	github.com/openshift/library-go v0.0.0-20240116081341-964bcb3f545c // indirect
 	github.com/peterbourgon/diskv v2.0.1+incompatible // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/prometheus/client_golang v1.18.0 // indirect
