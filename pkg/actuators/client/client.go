@@ -469,17 +469,19 @@ func (c *ibmCloudClient) GetSubnetIDbyName(subnetName string, resourceGroupID st
 	subnetOption.SetResourceGroupID(resourceGroupID)
 
 	// Get a list of all subnets
-	subnetList, _, err := c.vpcService.ListSubnets(subnetOption)
+	subnetPager, err := c.vpcService.NewSubnetsPager(subnetOption)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to get subnets pager: %w", err)
+	}
+	subnetList, err := subnetPager.GetAll()
+	if err != nil {
+		return "", fmt.Errorf("failed to get subnets: %w", err)
 	}
 
-	if subnetList != nil {
-		for _, eachSubnet := range subnetList.Subnets {
-			if *eachSubnet.Name == subnetName {
-				// Return Subnet ID
-				return *eachSubnet.ID, nil
-			}
+	for _, eachSubnet := range subnetList {
+		if *eachSubnet.Name == subnetName {
+			// Return Subnet ID
+			return *eachSubnet.ID, nil
 		}
 	}
 	return "", fmt.Errorf("could not retrieve subnet id of name: %v", subnetName)
