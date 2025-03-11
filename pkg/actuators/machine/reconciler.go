@@ -265,7 +265,11 @@ func (r *Reconciler) reconcileMachineWithCloudState(conditionFailed *ibmcloudpro
 			}
 		}
 		klog.Infof("%s: checking if machine is past replacement deadline", r.machine.Name)
-		if replacementRequired, err := r.checkMachineDeadline(machineReplaceDeadlineMinutes, newInstance.CreatedAt.String()); err == nil && replacementRequired {
+		masterMachine := false
+		if r.machine.Labels != nil && r.machine.Labels["machine.openshift.io/cluster-api-machine-role"] == "master" {
+			masterMachine = true
+		}
+		if replacementRequired, err := r.checkMachineDeadline(machineReplaceDeadlineMinutes, newInstance.CreatedAt.String()); (err == nil && replacementRequired) && !masterMachine {
 			// NOTE(cjschaef): If the machine needs to be replaced:
 			// 1. We need to purge Addresses and ProviderID to prevent the machine being marked as Failed, per
 			//    https://github.com/openshift/machine-api-operator/blob/6397450f3464ffb875f43011ed8ad7428e50f881/pkg/controller/machine/controller.go#L348-L362
