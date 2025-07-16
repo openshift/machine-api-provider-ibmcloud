@@ -499,7 +499,7 @@ func (c *ibmCloudClient) VerifyInstanceProfile(profileName string) (string, erro
 				return profileName, nil
 			}
 		}
-		return "", machine.InvalidMachineConfiguration(fmt.Sprintf("could not find instance profile: %v", profileName))
+		return "", machine.InvalidMachineConfiguration("%s", fmt.Sprintf("could not find instance profile: %v", profileName))
 	}
 	return "", fmt.Errorf("no instance profiles found")
 }
