@@ -2,8 +2,6 @@ module github.com/openshift/machine-api-provider-ibmcloud
 
 go 1.24.0
 
-toolchain go1.24.2
-
 require (
 	github.com/IBM/go-sdk-core/v5 v5.18.5
 	github.com/IBM/platform-services-go-sdk v0.74.0
