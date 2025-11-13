@@ -8,8 +8,8 @@ import (
 	reflect "reflect"
 
 	vpcv1 "github.com/IBM/vpc-go-sdk/vpcv1"
-	gomock "github.com/golang/mock/gomock"
 	v1 "github.com/openshift/machine-api-provider-ibmcloud/pkg/apis/ibmcloudprovider/v1"
+	gomock "go.uber.org/mock/gomock"
 )
 
 // MockClient is a mock of Client interface.
