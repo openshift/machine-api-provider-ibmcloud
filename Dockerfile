@@ -7,5 +7,5 @@ RUN unset VERSION \
  && GOPROXY=off NO_DOCKER=1 make build
 RUN mkdir -p /tmp/build && cp _output/linux/$(go env GOARCH)/machine-controller-manager /tmp/build/machine-controller-manager
 
-FROM registry.ci.openshift.org/ocp/4.22:base-rhel9
+FROM registry.ci.openshift.org/ocp/4.22:base-rhel9-minimal
 COPY --from=builder /tmp/build/machine-controller-manager /
