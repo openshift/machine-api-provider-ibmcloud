@@ -7,7 +7,7 @@ toolchain go1.22.4
 require (
 	github.com/IBM/go-sdk-core/v5 v5.17.5
 	github.com/IBM/platform-services-go-sdk v0.69.1
-	github.com/IBM/vpc-go-sdk v0.58.0
+	github.com/IBM/vpc-go-sdk v0.58.1
 	github.com/blang/semver v3.5.1+incompatible
 	github.com/coreos/ignition/v2 v2.19.0
 	github.com/go-logr/logr v1.4.2
