@@ -81,13 +81,11 @@ vet: ## Apply go vet to all go files
 	$(DOCKER_CMD) hack/go-vet.sh ./...
 
 .PHONY: test
-test: ## Run tests
-	@echo -e "\033[32mTesting...\033[0m"
-	$(DOCKER_CMD) hack/ci-test.sh
+test: unit ## Run tests
 
 .PHONY: unit
 unit: # Run unit test
-	$(DOCKER_CMD) go test -race -cover ./cmd/... ./pkg/...
+	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) -p path --bin-dir $(PROJECT_DIR)/bin --index https://raw.githubusercontent.com/openshift/api/master/envtest-releases.yaml)" ./hack/ci-test.sh
 
 .PHONY: build
 build: ## build binaries
