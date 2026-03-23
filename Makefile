@@ -38,7 +38,7 @@ BUILD_IMAGE ?= registry.ci.openshift.org/openshift/release:golang-1.21
 CGO_ENABLED = 0
 unit : CGO_ENABLED = 1
 
-NO_DOCKER ?= 0
+NO_DOCKER ?= 1
 ifeq ($(NO_DOCKER), 1)
   DOCKER_CMD = CGO_ENABLED=$(CGO_ENABLED)
   IMAGE_BUILD_CMD = imagebuilder
