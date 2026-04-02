@@ -5,7 +5,7 @@ go 1.23.0
 require (
 	github.com/IBM/go-sdk-core/v5 v5.18.5
 	github.com/IBM/platform-services-go-sdk v0.74.0
-	github.com/IBM/vpc-go-sdk v0.64.0
+	github.com/IBM/vpc-go-sdk v0.64.2
 	github.com/blang/semver v3.5.1+incompatible
 	github.com/coreos/ignition/v2 v2.20.0
 	github.com/go-logr/logr v1.4.2
