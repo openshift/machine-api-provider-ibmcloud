@@ -49,6 +49,37 @@ var (
 	}
 	expectedRawProviderSpec = `{"metadata":{},"vpc":"test-vpc","bootVolume":{"encryptionKey":""},"image":"test-instance-image","profile":"bx2d-32x128","dedicatedHost":"dedicated-host-name","region":"us-east","zone":"us-east-1","resourceGroup":"aaab-bbbc-cccd-zzzz-xxxx","primaryNetworkInterface":{"subnet":"test-subnet","securityGroups":["test-security-group-1","test-security-group-2"]},"userDataSecret":{"name":"userData"},"credentialsSecret":{"name":"credentialKey"}}`
 
+	expectedProviderSpecWithBootVolume = IBMCloudMachineProviderSpec{
+		VPC:           "test-vpc",
+		Image:         "test-instance-image",
+		Profile:       "bx2d-32x128",
+		DedicatedHost: "dedicated-host-name",
+		Zone:          "us-east-1",
+		Region:        "us-east",
+		ResourceGroup: "aaab-bbbc-cccd-zzzz-xxxx",
+		BootVolume: IBMCloudMachineBootVolume{
+			EncryptionKey: "crn:v1:bluemix:public:kms:us-east:a/key",
+			Profile:       "sdp",
+			SizeGiB:       100,
+			Iops:          3000,
+			Bandwidth:     1000,
+		},
+		UserDataSecret: &corev1.LocalObjectReference{
+			Name: "userData",
+		},
+		CredentialsSecret: &corev1.LocalObjectReference{
+			Name: "credentialKey",
+		},
+		PrimaryNetworkInterface: NetworkInterface{
+			Subnet: "test-subnet",
+			SecurityGroups: []string{
+				"test-security-group-1",
+				"test-security-group-2",
+			},
+		},
+	}
+	expectedRawProviderSpecWithBootVolume = `{"metadata":{},"vpc":"test-vpc","bootVolume":{"encryptionKey":"crn:v1:bluemix:public:kms:us-east:a/key","profile":"sdp","sizeGiB":100,"iops":3000,"bandwidth":1000},"image":"test-instance-image","profile":"bx2d-32x128","dedicatedHost":"dedicated-host-name","region":"us-east","zone":"us-east-1","resourceGroup":"aaab-bbbc-cccd-zzzz-xxxx","primaryNetworkInterface":{"subnet":"test-subnet","securityGroups":["test-security-group-1","test-security-group-2"]},"userDataSecret":{"name":"userData"},"credentialsSecret":{"name":"credentialKey"}}`
+
 	instanceID             = "test-instance-id"
 	instanceState          = "running"
 	expectedProviderStatus = IBMCloudMachineProviderStatus{
@@ -65,6 +96,16 @@ func TestRawExtensionFromProviderSpec(t *testing.T) {
 	}
 	if string(rawExtension.Raw) != expectedRawProviderSpec {
 		t.Errorf("Expected: %s, got: %s", expectedRawProviderSpec, string(rawExtension.Raw))
+	}
+}
+
+func TestRawExtensionFromProviderSpecWithBootVolume(t *testing.T) {
+	rawExtension, err := RawExtensionFromProviderSpec(&expectedProviderSpecWithBootVolume)
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+	if string(rawExtension.Raw) != expectedRawProviderSpecWithBootVolume {
+		t.Errorf("Expected: %s, got: %s", expectedRawProviderSpecWithBootVolume, string(rawExtension.Raw))
 	}
 }
 
@@ -88,6 +129,19 @@ func TestProviderSpecFromRawExtension(t *testing.T) {
 	}
 	if reflect.DeepEqual(providerSpec, expectedProviderSpec) {
 		t.Errorf("Expected: %v, got: %v", expectedProviderSpec, providerSpec)
+	}
+}
+
+func TestProviderSpecFromRawExtensionWithBootVolume(t *testing.T) {
+	rawExtension := runtime.RawExtension{
+		Raw: []byte(expectedRawProviderSpecWithBootVolume),
+	}
+	providerSpec, err := ProviderSpecFromRawExtension(&rawExtension)
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+	if !reflect.DeepEqual(*providerSpec, expectedProviderSpecWithBootVolume) {
+		t.Errorf("Expected: %v, got: %v", expectedProviderSpecWithBootVolume, *providerSpec)
 	}
 }
 
