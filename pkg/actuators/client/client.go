@@ -387,16 +387,34 @@ func (c *ibmCloudClient) InstanceCreate(machineName string, machineProviderConfi
 	}
 
 	// Configure machine's boot volume, if necessary.
-	if machineProviderConfig.BootVolume.EncryptionKey != "" {
-		instancePrototypeObj.BootVolumeAttachment = &vpcv1.VolumeAttachmentPrototypeInstanceByImageContext{
-			Volume: &vpcv1.VolumePrototypeInstanceByImageContext{
-				EncryptionKey: &vpcv1.EncryptionKeyIdentity{
-					CRN: &machineProviderConfig.BootVolume.EncryptionKey,
-				},
-				Profile: &vpcv1.VolumeProfileIdentity{
-					Name: pointer.String(ibmcloudutil.BootVolumeDefaultProfile),
-				},
+	bootVolumeConfig := machineProviderConfig.BootVolume
+	if bootVolumeConfig != (ibmcloudproviderv1.IBMCloudMachineBootVolume{}) {
+		bootVolume := &vpcv1.VolumePrototypeInstanceByImageContext{
+			Profile: &vpcv1.VolumeProfileIdentity{
+				Name: pointer.String(ibmcloudutil.BootVolumeDefaultProfile),
 			},
+		}
+		if bootVolumeConfig.Profile != "" {
+			bootVolume.Profile = &vpcv1.VolumeProfileIdentity{
+				Name: &bootVolumeConfig.Profile,
+			}
+		}
+		if bootVolumeConfig.SizeGiB != 0 {
+			bootVolume.Capacity = &bootVolumeConfig.SizeGiB
+		}
+		if bootVolumeConfig.Iops != 0 {
+			bootVolume.Iops = &bootVolumeConfig.Iops
+		}
+		if bootVolumeConfig.Bandwidth != 0 {
+			bootVolume.Bandwidth = &bootVolumeConfig.Bandwidth
+		}
+		if bootVolumeConfig.EncryptionKey != "" {
+			bootVolume.EncryptionKey = &vpcv1.EncryptionKeyIdentity{
+				CRN: &bootVolumeConfig.EncryptionKey,
+			}
+		}
+		instancePrototypeObj.BootVolumeAttachment = &vpcv1.VolumeAttachmentPrototypeInstanceByImageContext{
+			Volume: bootVolume,
 		}
 	}
 
