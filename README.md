@@ -7,3 +7,7 @@ This provider runs as a machine-controller deployed by the
 [machine-api-operator](https://github.com/openshift/machine-api-operator)
 
 For troubleshooting Makefile permission issues see [hacking-guide](https://github.com/openshift/machine-api-operator/blob/master/docs/dev/hacking-guide.md#troubleshooting-make-targets).
+
+## Development
+
+- [Bumping Kubernetes and Go](docs/development/bump-k8s-go.md)
