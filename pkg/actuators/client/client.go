@@ -26,7 +26,7 @@ import (
 	configv1 "github.com/openshift/api/config/v1"
 	"github.com/openshift/machine-api-operator/pkg/controller/machine"
 	klog "k8s.io/klog/v2"
-	"k8s.io/utils/pointer"
+	"k8s.io/utils/ptr"
 
 	ibmcloudclienterrors "github.com/openshift/machine-api-provider-ibmcloud/pkg/actuators/client/errors"
 	ibmcloudutil "github.com/openshift/machine-api-provider-ibmcloud/pkg/actuators/util"
@@ -391,7 +391,7 @@ func (c *ibmCloudClient) InstanceCreate(machineName string, machineProviderConfi
 	if bootVolumeConfig != (ibmcloudproviderv1.IBMCloudMachineBootVolume{}) {
 		bootVolume := &vpcv1.VolumePrototypeInstanceByImageContext{
 			Profile: &vpcv1.VolumeProfileIdentity{
-				Name: pointer.String(ibmcloudutil.BootVolumeDefaultProfile),
+				Name: ptr.To(ibmcloudutil.BootVolumeDefaultProfile),
 			},
 		}
 		if bootVolumeConfig.Profile != "" {
