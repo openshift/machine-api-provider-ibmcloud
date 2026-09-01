@@ -10,12 +10,12 @@ require (
 	github.com/coreos/ignition/v2 v2.20.0
 	github.com/go-logr/logr v1.4.3
 	github.com/golang-jwt/jwt v3.2.2+incompatible
-	github.com/golang/mock v1.6.0
 	github.com/onsi/ginkgo/v2 v2.28.1
 	github.com/onsi/gomega v1.40.0
 	github.com/openshift/api v0.0.0-20260715165912-72066cc9718b
 	github.com/openshift/library-go v0.0.0-20260716104731-fdf18b82797f
 	github.com/openshift/machine-api-operator v0.2.1-0.20260728080121-c24b61e0ea06
+	go.uber.org/mock v0.6.0
 	k8s.io/api v0.36.2
 	k8s.io/apimachinery v0.36.2
 	k8s.io/apiserver v0.36.2
