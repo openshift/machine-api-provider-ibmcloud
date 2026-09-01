@@ -9,6 +9,7 @@ package tools
 import (
 	_ "github.com/golang/mock/mockgen"
 	_ "github.com/openshift/api/machine/v1beta1/zz_generated.crd-manifests"
+	_ "golang.org/x/lint/golint"
 	_ "sigs.k8s.io/controller-runtime/tools/setup-envtest"
 	_ "sigs.k8s.io/controller-tools/cmd/controller-gen"
 )
