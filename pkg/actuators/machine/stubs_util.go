@@ -18,8 +18,10 @@ package machine
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/IBM/vpc-go-sdk/vpcv1"
+	"github.com/go-openapi/strfmt"
 	machinev1 "github.com/openshift/api/machine/v1beta1"
 	ibmcloudproviderv1 "github.com/openshift/machine-api-provider-ibmcloud/pkg/apis/ibmcloudprovider/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -34,6 +36,8 @@ func stubInstanceGetByName(name string, machineProviderConfig *ibmcloudproviderv
 	address := "10.0.0.1"
 	returnPrimaryIP := &vpcv1.ReservedIPReference{Address: &address}
 	returnRunning := "running"
+	returnStable := "stable"
+	returnCreatedAt := strfmt.DateTime(time.Now())
 
 	return &vpcv1.Instance{
 		Name: &returnName,
@@ -43,7 +47,9 @@ func stubInstanceGetByName(name string, machineProviderConfig *ibmcloudproviderv
 			Name:      &returnPrimaryNetName,
 			PrimaryIP: returnPrimaryIP,
 		},
-		Status: &returnRunning,
+		Status:         &returnRunning,
+		LifecycleState: &returnStable,
+		CreatedAt:      &returnCreatedAt,
 	}, nil
 }
 

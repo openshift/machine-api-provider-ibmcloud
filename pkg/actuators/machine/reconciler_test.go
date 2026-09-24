@@ -21,8 +21,10 @@ import (
 	"errors"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/IBM/vpc-go-sdk/vpcv1"
+	"github.com/go-openapi/strfmt"
 	machinev1 "github.com/openshift/api/machine/v1beta1"
 	machinecontroller "github.com/openshift/machine-api-operator/pkg/controller/machine"
 	ibmclient "github.com/openshift/machine-api-provider-ibmcloud/pkg/actuators/client"
@@ -34,6 +36,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	controllerfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
@@ -453,6 +456,421 @@ func TestReconcileMachineWithCloudState(t *testing.T) {
 	}
 	if *r.providerStatus.InstanceID != instanceID {
 		t.Errorf("Expected: %s, got: %s", instanceID, *r.providerStatus.InstanceID)
+	}
+}
+
+// Statuses, lifecycle states and lifecycle reasons of an instance, used by the tests of the lifecycle state checks.
+// These are the values the IBM Cloud API reports, so they are deliberately not the constants of the provider.
+const (
+	statusDeleting               = "deleting"
+	lifecycleStateStable         = "stable"
+	lifecycleStateFailed         = "failed"
+	lifecycleStatePending        = "pending"
+	lifecycleReasonCode          = "pending_registration"
+	lifecycleReasonMessage       = "The registration for the instance is in progress."
+	lifecycleReasonFailedCode    = "failed_registration"
+	lifecycleReasonFailedMessage = "The registration for the instance has failed."
+)
+
+func TestReconcileMachineWithCloudStateLifecycleState(t *testing.T) {
+	pastLifecycleDeadline := (machineLifecycleStableDeadlineMinutes + 1) * time.Minute
+
+	cases := []struct {
+		name           string
+		phase          string
+		status         string
+		lifecycleState string
+		createdAgo     time.Duration
+		expectRequeue  bool
+		expectFailed   bool
+	}{
+		{
+			name:           "Instance with stable lifecycle state is provisioned",
+			phase:          machinev1.PhaseProvisioning,
+			lifecycleState: lifecycleStateStable,
+			createdAgo:     time.Minute,
+			expectRequeue:  false,
+			expectFailed:   false,
+		},
+		{
+			name:           "Instance with pending lifecycle state within deadline is requeued",
+			phase:          machinev1.PhaseProvisioning,
+			lifecycleState: lifecycleStatePending,
+			createdAgo:     time.Minute,
+			expectRequeue:  true,
+			expectFailed:   false,
+		},
+		{
+			name:           "Machine without phase with pending lifecycle state within deadline is requeued",
+			lifecycleState: lifecycleStatePending,
+			createdAgo:     time.Minute,
+			expectRequeue:  true,
+			expectFailed:   false,
+		},
+		{
+			name:           "Machine with pending lifecycle state past deadline fails",
+			phase:          machinev1.PhaseProvisioning,
+			lifecycleState: lifecycleStatePending,
+			createdAgo:     pastLifecycleDeadline,
+			expectRequeue:  false,
+			expectFailed:   true,
+		},
+		{
+			name:           "Machine with failed lifecycle state fails within deadline",
+			phase:          machinev1.PhaseProvisioning,
+			lifecycleState: lifecycleStateFailed,
+			createdAgo:     time.Minute,
+			expectRequeue:  false,
+			expectFailed:   true,
+		},
+		{
+			name:           "Machine whose instance is being deleted does not fail",
+			phase:          machinev1.PhaseProvisioning,
+			status:         statusDeleting,
+			lifecycleState: lifecycleStatePending,
+			createdAgo:     pastLifecycleDeadline,
+			expectRequeue:  true,
+			expectFailed:   false,
+		},
+		{
+			name:           "Provisioned machine with pending lifecycle state past deadline does not fail",
+			phase:          machinev1.PhaseProvisioned,
+			lifecycleState: lifecycleStatePending,
+			createdAgo:     pastLifecycleDeadline,
+			expectRequeue:  false,
+			expectFailed:   false,
+		},
+		{
+			name:           "Running machine with pending lifecycle state past deadline does not fail",
+			phase:          machinev1.PhaseRunning,
+			lifecycleState: lifecycleStatePending,
+			createdAgo:     pastLifecycleDeadline,
+			expectRequeue:  false,
+			expectFailed:   false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			mockCtrl := gomock.NewController(t)
+			mockIBMClient := mockibm.NewMockClient(mockCtrl)
+
+			providerSpec, err := ibmcloudproviderv1.RawExtensionFromProviderSpec(&ibmcloudproviderv1.IBMCloudMachineProviderSpec{})
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			machine := &machinev1.Machine{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-instance-name",
+					Namespace: "test-ns",
+					Labels:    map[string]string{machinev1.MachineClusterIDLabel: "CLUSTERID"},
+				},
+				Spec: machinev1.MachineSpec{
+					ProviderSpec: machinev1.ProviderSpec{
+						Value: providerSpec,
+					},
+				},
+			}
+			if tc.phase != "" {
+				machine.Status.Phase = &tc.phase
+			}
+
+			machineScope, err := newMachineScope(machineScopeParams{
+				machine: machine,
+				client:  controllerfake.NewFakeClient(),
+				ibmClientBuilder: func(coreClient client.Client, secretVal string, providerSpec ibmcloudproviderv1.IBMCloudMachineProviderSpec) (ibmclient.Client, error) {
+					return mockIBMClient, nil
+				},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			instance, err := stubInstanceGetByName(machine.Name, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.status != "" {
+				instance.Status = &tc.status
+			}
+			instance.LifecycleState = &tc.lifecycleState
+			instance.LifecycleReasons = []vpcv1.InstanceLifecycleReason{{
+				Code:    ptr.To(lifecycleReasonCode),
+				Message: ptr.To(lifecycleReasonMessage),
+			}}
+			createdAt := strfmt.DateTime(time.Now().Add(-tc.createdAgo))
+			instance.CreatedAt = &createdAt
+
+			mockIBMClient.EXPECT().GetAccountID().Return("accountID", nil).AnyTimes()
+			mockIBMClient.EXPECT().InstanceGetByName(gomock.Any(), gomock.Any()).Return(instance, nil).AnyTimes()
+
+			r := newReconciler(machineScope)
+			err = r.reconcileMachineWithCloudState(nil)
+
+			var requeueErr *machinecontroller.RequeueAfterError
+			if tc.expectRequeue != errors.As(err, &requeueErr) {
+				t.Errorf("Expected requeue to be %v, got error: %v", tc.expectRequeue, err)
+			}
+
+			phase := ptr.Deref(r.machine.Status.Phase, "")
+			if tc.expectFailed {
+				if phase != machinev1.PhaseFailed {
+					t.Errorf("Expected machine phase %s, got: %s", machinev1.PhaseFailed, phase)
+				}
+				if ptr.Deref(r.machine.Status.ErrorReason, "") != machinev1.CreateMachineError {
+					t.Errorf("Expected error reason %s, got: %v", machinev1.CreateMachineError, r.machine.Status.ErrorReason)
+				}
+				if ptr.Deref(r.machine.Status.ErrorMessage, "") == "" {
+					t.Error("Expected an error message")
+				}
+				var machineErr *machinecontroller.MachineError
+				if !errors.As(err, &machineErr) {
+					t.Errorf("Expected a MachineError, got: %v", err)
+				}
+			} else {
+				if phase == machinev1.PhaseFailed {
+					t.Error("Expected machine not to be failed")
+				}
+				if r.machine.Status.ErrorMessage != nil {
+					t.Errorf("Expected no error message, got: %s", *r.machine.Status.ErrorMessage)
+				}
+			}
+		})
+	}
+}
+
+func TestProvisioningFailureMessage(t *testing.T) {
+	pastLifecycleDeadline := (machineLifecycleStableDeadlineMinutes + 1) * time.Minute
+
+	cases := []struct {
+		name            string
+		phase           string
+		status          string
+		lifecycleState  string
+		createdAgo      time.Duration
+		expectedMessage string
+	}{
+		{
+			name:            "Instance with stable lifecycle state",
+			phase:           machinev1.PhaseProvisioning,
+			lifecycleState:  lifecycleStateStable,
+			createdAgo:      pastLifecycleDeadline,
+			expectedMessage: "",
+		},
+		{
+			name:            "Instance with pending lifecycle state within deadline",
+			phase:           machinev1.PhaseProvisioning,
+			lifecycleState:  lifecycleStatePending,
+			createdAgo:      time.Minute,
+			expectedMessage: "",
+		},
+		{
+			name:            "Instance with pending lifecycle state past deadline",
+			phase:           machinev1.PhaseProvisioning,
+			lifecycleState:  lifecycleStatePending,
+			createdAgo:      pastLifecycleDeadline,
+			expectedMessage: `instance lifecycle state is "pending", expected "stable" within 15 minutes of the instance creation: pending_registration: The registration for the instance is in progress.`,
+		},
+		{
+			name:            "Instance with failed lifecycle state within deadline",
+			phase:           machinev1.PhaseProvisioning,
+			lifecycleState:  lifecycleStateFailed,
+			createdAgo:      time.Minute,
+			expectedMessage: `instance lifecycle state is "failed": pending_registration: The registration for the instance is in progress.`,
+		},
+		{
+			name:            "Instance that is being deleted",
+			phase:           machinev1.PhaseProvisioning,
+			status:          statusDeleting,
+			lifecycleState:  lifecycleStatePending,
+			createdAgo:      pastLifecycleDeadline,
+			expectedMessage: "",
+		},
+		{
+			name:            "Machine without a phase",
+			lifecycleState:  lifecycleStatePending,
+			createdAgo:      pastLifecycleDeadline,
+			expectedMessage: `instance lifecycle state is "pending", expected "stable" within 15 minutes of the instance creation: pending_registration: The registration for the instance is in progress.`,
+		},
+		{
+			name:            "Provisioned machine",
+			phase:           machinev1.PhaseProvisioned,
+			lifecycleState:  lifecycleStatePending,
+			createdAgo:      pastLifecycleDeadline,
+			expectedMessage: "",
+		},
+		{
+			name:            "Running machine",
+			phase:           machinev1.PhaseRunning,
+			lifecycleState:  lifecycleStatePending,
+			createdAgo:      pastLifecycleDeadline,
+			expectedMessage: "",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			machine := &machinev1.Machine{ObjectMeta: metav1.ObjectMeta{Name: "test-instance-name"}}
+			if tc.phase != "" {
+				machine.Status.Phase = &tc.phase
+			}
+			r := Reconciler{machineScope: &machineScope{machine: machine}}
+
+			createdAt := strfmt.DateTime(time.Now().Add(-tc.createdAgo))
+			instance := &vpcv1.Instance{
+				LifecycleState: &tc.lifecycleState,
+				CreatedAt:      &createdAt,
+				LifecycleReasons: []vpcv1.InstanceLifecycleReason{{
+					Code:    ptr.To(lifecycleReasonCode),
+					Message: ptr.To(lifecycleReasonMessage),
+				}},
+			}
+			if tc.status != "" {
+				instance.Status = &tc.status
+			}
+
+			if message := r.provisioningFailureMessage(instance); message != tc.expectedMessage {
+				t.Errorf("Expected: %q, got: %q", tc.expectedMessage, message)
+			}
+		})
+	}
+}
+
+func TestProvisioningFailureMessageWithoutCreationTime(t *testing.T) {
+	phase := machinev1.PhaseProvisioning
+	machine := &machinev1.Machine{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-instance-name"},
+		Status:     machinev1.MachineStatus{Phase: &phase},
+	}
+	r := Reconciler{machineScope: &machineScope{machine: machine}}
+
+	instance := &vpcv1.Instance{LifecycleState: ptr.To(lifecycleStatePending)}
+	if message := r.provisioningFailureMessage(instance); message != "" {
+		t.Errorf("Expected no message, got: %q", message)
+	}
+}
+
+func TestLifecycleReasons(t *testing.T) {
+	cases := []struct {
+		name     string
+		reasons  []vpcv1.InstanceLifecycleReason
+		expected string
+	}{
+		{
+			name:     "No reasons",
+			expected: "",
+		},
+		{
+			name:     "Reason without a code and a message",
+			reasons:  []vpcv1.InstanceLifecycleReason{{}},
+			expected: "",
+		},
+		{
+			name:     "Reason without a message",
+			reasons:  []vpcv1.InstanceLifecycleReason{{Code: ptr.To("internal_error")}},
+			expected: ": internal_error",
+		},
+		{
+			name:     "Reason without a code",
+			reasons:  []vpcv1.InstanceLifecycleReason{{Message: ptr.To("Internal error")}},
+			expected: ": Internal error",
+		},
+		{
+			name:     "Reason with a code and a message",
+			reasons:  []vpcv1.InstanceLifecycleReason{{Code: ptr.To(lifecycleReasonCode), Message: ptr.To(lifecycleReasonMessage)}},
+			expected: fmt.Sprintf(": %s: %s", lifecycleReasonCode, lifecycleReasonMessage),
+		},
+		{
+			name: "Multiple reasons",
+			reasons: []vpcv1.InstanceLifecycleReason{
+				{Code: ptr.To("pending_registration"), Message: ptr.To("Registration in progress.")},
+				{Code: ptr.To("internal_error")},
+				{},
+			},
+			expected: ": pending_registration: Registration in progress., internal_error",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if reasons := lifecycleReasons(&vpcv1.Instance{LifecycleReasons: tc.reasons}); reasons != tc.expected {
+				t.Errorf("Expected: %q, got: %q", tc.expected, reasons)
+			}
+		})
+	}
+}
+
+func TestFailedMachineIsPersisted(t *testing.T) {
+	mockCtrl := gomock.NewController(t)
+	mockIBMClient := mockibm.NewMockClient(mockCtrl)
+
+	providerSpec, err := ibmcloudproviderv1.RawExtensionFromProviderSpec(&ibmcloudproviderv1.IBMCloudMachineProviderSpec{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	phase := machinev1.PhaseProvisioning
+	machine := &machinev1.Machine{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-instance-name",
+			Namespace: "test-ns",
+			Labels:    map[string]string{machinev1.MachineClusterIDLabel: "CLUSTERID"},
+		},
+		Spec: machinev1.MachineSpec{
+			ProviderSpec: machinev1.ProviderSpec{Value: providerSpec},
+		},
+		Status: machinev1.MachineStatus{Phase: &phase},
+	}
+
+	fakeClient := controllerfake.NewClientBuilder().
+		WithScheme(scheme.Scheme).
+		WithObjects(machine).
+		WithStatusSubresource(&machinev1.Machine{}).
+		Build()
+	machineScope, err := newMachineScope(machineScopeParams{
+		machine: machine,
+		client:  fakeClient,
+		ibmClientBuilder: func(coreClient client.Client, secretVal string, providerSpec ibmcloudproviderv1.IBMCloudMachineProviderSpec) (ibmclient.Client, error) {
+			return mockIBMClient, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	instance, err := stubInstanceGetByName(machine.Name, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	instance.LifecycleState = ptr.To(lifecycleStateFailed)
+	instance.LifecycleReasons = []vpcv1.InstanceLifecycleReason{{
+		Code:    ptr.To(lifecycleReasonFailedCode),
+		Message: ptr.To(lifecycleReasonFailedMessage),
+	}}
+	mockIBMClient.EXPECT().GetAccountID().Return("accountID", nil).AnyTimes()
+	mockIBMClient.EXPECT().InstanceGetByName(gomock.Any(), gomock.Any()).Return(instance, nil).AnyTimes()
+
+	// The machine is persisted by the scope, like the actuator does when the reconciler returns an error
+	if err := newReconciler(machineScope).update(); err == nil {
+		t.Error("reconciler was expected to return an error")
+	}
+	if err := machineScope.Close(); err != nil {
+		t.Fatalf("failed to close machine scope: %v", err)
+	}
+
+	persisted := &machinev1.Machine{}
+	if err := fakeClient.Get(context.Background(), client.ObjectKeyFromObject(machine), persisted); err != nil {
+		t.Fatalf("failed to get machine: %v", err)
+	}
+	if persistedPhase := ptr.Deref(persisted.Status.Phase, ""); persistedPhase != machinev1.PhaseFailed {
+		t.Errorf("Expected persisted phase %s, got: %s", machinev1.PhaseFailed, persistedPhase)
+	}
+	if ptr.Deref(persisted.Status.ErrorReason, "") != machinev1.CreateMachineError {
+		t.Errorf("Expected persisted error reason %s, got: %v", machinev1.CreateMachineError, persisted.Status.ErrorReason)
+	}
+	expectedErrorMessage := `instance lifecycle state is "failed": failed_registration: The registration for the instance has failed.`
+	if errorMessage := ptr.Deref(persisted.Status.ErrorMessage, ""); errorMessage != expectedErrorMessage {
+		t.Errorf("Expected persisted error message: %q, got: %q", expectedErrorMessage, errorMessage)
 	}
 }
 

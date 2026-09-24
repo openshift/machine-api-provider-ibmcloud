@@ -48,9 +48,15 @@ const (
 	// Time in minutes a Provisioned machine has before a delete is called to force re-create
 	machineReplaceDeadlineMinutes = 15
 	machineDeleteDeadlineMinutes  = 10
+	// Time in minutes an instance of a machine that is being provisioned has to reach a stable lifecycle state before
+	// the machine is marked as failed
+	machineLifecycleStableDeadlineMinutes = 15
 	// Status of IBM Cloud instances
 	ibmStatusRunning  = "running"
 	ibmStatusDeleting = "deleting"
+	// Lifecycle states of IBM Cloud instances
+	ibmLifecycleStateStable = "stable"
+	ibmLifecycleStateFailed = "failed"
 	// Used to check Ignition Config sources for Https locations only (for MCS)
 	httpsPrefix = "https://"
 )
@@ -363,12 +369,94 @@ func (r *Reconciler) reconcileMachineWithCloudState(conditionFailed *ibmcloudpro
 	// Update labels & Annotations
 	r.setMachineCloudProviderSpecifics(newInstance)
 
-	// Requeue if status is not Running
-	if *newInstance.Status != ibmStatusRunning {
-		klog.Infof("%s: machine status is %q, requeuing...", r.machine.Name, *newInstance.Status)
+	lifecycleState := ptr.Deref(newInstance.LifecycleState, "")
+	if lifecycleState != ibmLifecycleStateStable {
+		klog.Infof("%s: instance lifecycle state is %q%s", r.machine.Name, lifecycleState, lifecycleReasons(newInstance))
+	}
+
+	// Mark the machine as failed if its instance did not finish provisioning
+	if failureMessage := r.provisioningFailureMessage(newInstance); failureMessage != "" {
+		return r.failMachine(failureMessage)
+	}
+
+	// Requeue if status is not Running, or the instance of a machine that is being provisioned is not stable yet.
+	if *newInstance.Status != ibmStatusRunning || (r.machineProvisioning() && lifecycleState != ibmLifecycleStateStable) {
+		klog.Infof("%s: machine status is %q, lifecycle state is %q, requeuing...", r.machine.Name, *newInstance.Status, lifecycleState)
 		return &machinecontroller.RequeueAfterError{RequeueAfter: requeueAfterSeconds * time.Second}
 	}
 	return nil
+}
+
+// provisioningFailureMessage returns a message describing why the instance of a machine that is being provisioned will
+// not become usable, or an empty string if the instance can still finish provisioning. IBM Cloud registers a new
+// instance in the background and withdraws an instance whose registration did not complete, so an instance whose
+// lifecycle state does not become "stable" is lost eventually.
+func (r *Reconciler) provisioningFailureMessage(instance *vpcv1.Instance) string {
+	// An instance that is being deleted is not reported as a failure, the machine is failed by the machine controller
+	// once the instance is gone
+	if !r.machineProvisioning() || ptr.Deref(instance.Status, "") == ibmStatusDeleting {
+		return ""
+	}
+
+	// Only "stable" and "failed" are acted on, every other lifecycle state waits for the deadline, whether it is a
+	// documented state, or one that is added later, as the values of enumerated properties of the API can expand.
+	lifecycleState := ptr.Deref(instance.LifecycleState, "")
+	if lifecycleState == ibmLifecycleStateStable {
+		return ""
+	}
+
+	if lifecycleState != ibmLifecycleStateFailed {
+		if instance.CreatedAt == nil {
+			klog.Warningf("%s: instance has no creation time, cannot check lifecycle state deadline", r.machine.Name)
+			return ""
+		}
+		if time.Now().Before(time.Time(*instance.CreatedAt).Add(machineLifecycleStableDeadlineMinutes * time.Minute)) {
+			return ""
+		}
+		return fmt.Sprintf("instance lifecycle state is %q, expected %q within %d minutes of the instance creation%s", lifecycleState, ibmLifecycleStateStable, machineLifecycleStableDeadlineMinutes, lifecycleReasons(instance))
+	}
+
+	return fmt.Sprintf("instance lifecycle state is %q%s", lifecycleState, lifecycleReasons(instance))
+}
+
+// failMachine marks the machine as failed, so that it is not mistaken for a machine that can still become usable.
+func (r *Reconciler) failMachine(failureMessage string) error {
+	klog.Errorf("%s: %s", r.machine.Name, failureMessage)
+	// The phase is set here and the error is returned, so that the machine controller persists the failed machine
+	r.machine.Status.Phase = ptr.To(machinev1.PhaseFailed)
+	r.machine.Status.ErrorReason = ptr.To(machinev1.CreateMachineError)
+	r.machine.Status.ErrorMessage = ptr.To(failureMessage)
+
+	return machinecontroller.CreateMachine("%s", failureMessage)
+}
+
+// machineProvisioning returns true if the machine is being provisioned, i.e. its instance was never running with a
+// stable lifecycle state.
+func (r *Reconciler) machineProvisioning() bool {
+	phase := ptr.Deref(r.machine.Status.Phase, "")
+	return phase == "" || phase == machinev1.PhaseProvisioning
+}
+
+// lifecycleReasons returns the reasons for the lifecycle state of the instance, to be appended to a message. Reasons
+// without a code or a message are reported with the part that is set, reasons without either of them are skipped.
+func lifecycleReasons(instance *vpcv1.Instance) string {
+	reasons := make([]string, 0, len(instance.LifecycleReasons))
+	for _, reason := range instance.LifecycleReasons {
+		code, message := ptr.Deref(reason.Code, ""), ptr.Deref(reason.Message, "")
+		switch {
+		case code != "" && message != "":
+			reasons = append(reasons, fmt.Sprintf("%s: %s", code, message))
+		case code != "":
+			reasons = append(reasons, code)
+		case message != "":
+			reasons = append(reasons, message)
+		}
+	}
+	if len(reasons) == 0 {
+		return ""
+	}
+
+	return fmt.Sprintf(": %s", strings.Join(reasons, ", "))
 }
 
 // checkMachineDeadline will check whether a deadline has been passed from a RFC3339 formatted start time
