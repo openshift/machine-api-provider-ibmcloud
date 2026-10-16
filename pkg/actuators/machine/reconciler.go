@@ -18,13 +18,11 @@ package machine
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/IBM/vpc-go-sdk/vpcv1"
-	igntypes "github.com/coreos/ignition/v2/config/v3_2/types"
 	machinev1 "github.com/openshift/api/machine/v1beta1"
 	machinecontroller "github.com/openshift/machine-api-operator/pkg/controller/machine"
 	"github.com/openshift/machine-api-operator/pkg/metrics"
@@ -34,7 +32,6 @@ import (
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	ibmcloudclienterrors "github.com/openshift/machine-api-provider-ibmcloud/pkg/actuators/client/errors"
 	ibmcloudproviderv1 "github.com/openshift/machine-api-provider-ibmcloud/pkg/apis/ibmcloudprovider/v1"
 )
 
@@ -43,16 +40,18 @@ const (
 	requeueAfterFatalSeconds = 180
 	userDataSecretKey        = "userData"
 
-	// The following values are used for machine replacement, when it appears the machine is stuck and unresponsive as part of
-	// https://issues.redhat.com/browse/OCPBUGS-1327
-	// Time in minutes a Provisioned machine has before a delete is called to force re-create
-	machineReplaceDeadlineMinutes = 15
-	machineDeleteDeadlineMinutes  = 10
+	// Time in minutes an instance of a machine that is being provisioned has to reach a stable lifecycle state before
+	// the machine is marked as failed
+	machineLifecycleStableDeadlineMinutes = 15
+	// Time in minutes the instance of a provisioned machine has to register its node before the machine is marked as
+	// failed, e.g. when the instance cannot fetch its Ignition config from the Machine Config Server
+	machineNodeDeadlineMinutes = 30
 	// Status of IBM Cloud instances
 	ibmStatusRunning  = "running"
 	ibmStatusDeleting = "deleting"
-	// Used to check Ignition Config sources for Https locations only (for MCS)
-	httpsPrefix = "https://"
+	// Lifecycle states of IBM Cloud instances
+	ibmLifecycleStateStable = "stable"
+	ibmLifecycleStateFailed = "failed"
 )
 
 // Reconciler are list of services required by machine actuator, easy to create a fake
@@ -192,122 +191,7 @@ func (r *Reconciler) reconcileMachineWithCloudState(conditionFailed *ibmcloudpro
 	// conditionFailed is nil, get the cloud instance and reconcile the fields
 	newInstance, err := r.ibmClient.InstanceGetByName(r.machine.Name, r.providerSpec)
 	if err != nil {
-		// Check whether the machine was recently removed to replace a stuck machine in order to resolve
-		// https://issues.redhat.com/browse/OCPBUGS-1327
-		// We need to wait until the IBM Cloud VSI is actually gone before re-creating it with the same name (to prevent cascading issues using a different name)
-		// Check if the machine just completed deletion and should now have a replacement in progress
-		if _, okay := err.(*ibmcloudclienterrors.InstanceNotFoundError); okay && conditionTypeCheck(r.providerStatus.Conditions, ibmcloudproviderv1.MachineReplacement) != nil {
-			// Verify the instance no longer exists, using the instance Id, return an error if instance with same Id but different name exists (in case it was renamed)
-			if invalidInstance, err := r.ibmClient.InstanceGetByID(*r.providerStatus.InstanceID); err == nil {
-				klog.Warningf("%s: machine name and instance Id mismatch during replacement delete check", r.machine.Name)
-				return fmt.Errorf("machine %s name for replaced machine doesn't match expected %s for instance id: %s", *invalidInstance.Name, r.machine.Name, *r.providerStatus.InstanceID)
-			}
-			klog.Infof("%s: setting machine's status to Provisioning for replacement machine", r.machine.Name)
-			r.machine.Status.Phase = ptr.To(machinev1.PhaseProvisioning)
-			return nil
-		}
 		return fmt.Errorf("get instance failed with an error: %q", err)
-	}
-
-	// Check whether the machine is being deleted due to a replacement request and then determine if that deletion has passed a deadline, 'machineDeletedDeadline'
-	if newInstance.Status != nil && *newInstance.Status == ibmStatusDeleting {
-		if machineReplacementCondition := conditionTypeCheck(r.providerStatus.Conditions, ibmcloudproviderv1.MachineReplacement); machineReplacementCondition != nil {
-			// Update machine replacement status to in progress if it hasn't been yet
-			if machineReplacementCondition.Reason == ibmcloudproviderv1.MachineReplacementRequested {
-				klog.Infof("%s: machine replacement now in progress", r.machine.Name)
-				r.providerStatus.Conditions = reconcileProviderConditions(r.providerStatus.Conditions, ibmcloudproviderv1.IBMCloudMachineProviderCondition{
-					Type:    ibmcloudproviderv1.MachineReplacement,
-					Reason:  ibmcloudproviderv1.MachineReplacementInProgress,
-					Message: machineReplacementInProgressMessageCondition,
-					Status:  apicorev1.ConditionTrue,
-				})
-				return nil
-			} else if machineReplacementCondition.Reason == ibmcloudproviderv1.MachineReplacementFailed {
-				// If replacement failed, attempt to update the status to Failed, if not already done
-				klog.Infof("%s: machine replacement failed", r.machine.Name)
-				if r.machine.Status.Phase != nil && *r.machine.Status.Phase != machinev1.PhaseFailed {
-					r.machine.Status.Phase = ptr.To(machinev1.PhaseFailed)
-					return nil
-				}
-			}
-			// Machine replacement should be in progress
-			// Check whether the machine is past the deletion deadline, returning an error if so
-			klog.Infof("%s: checking if machine is past replacement deletion deadline", r.machine.Name)
-			deletePastDeadline, err := r.checkMachineDeadline(machineDeleteDeadlineMinutes, machineReplacementCondition.LastTransitionTime.Format(time.RFC3339))
-			if err != nil {
-				return fmt.Errorf("failed calculating delete deadline with error: %q", err)
-			} else if deletePastDeadline {
-				// If machine has failed to be replaced by deadline, update status and return an error
-				klog.Warningf("%s: machine failed to delete for replacement within deadline", r.machine.Name)
-				r.providerStatus.Conditions = reconcileProviderConditions(r.providerStatus.Conditions, ibmcloudproviderv1.IBMCloudMachineProviderCondition{
-					Type:    ibmcloudproviderv1.MachineReplacement,
-					Reason:  ibmcloudproviderv1.MachineReplacementFailed,
-					Message: machineReplacementFailedMessageCondition,
-					Status:  apicorev1.ConditionTrue,
-				})
-				return machinecontroller.DeleteMachine("%s: machine failed to delete within %d minute deadline for replacement", r.machine.Name, machineDeleteDeadlineMinutes)
-			}
-			klog.Infof("%s: waiting for stuck machine to be deleted prior to replacement", r.machine.Name)
-			return nil
-		}
-	}
-
-	// Check whether the machine remains in Provisioned state but not Running for more than 'machineReplaceDeadlineMinutes'
-	// Attempt to mitigate https://issues.redhat.com/browse/OCPBUGS-1327
-	// Bypass check if machine statuses do not match this expected case
-	if newInstance.Status != nil && *newInstance.Status == ibmStatusRunning && r.machine.Status.Phase != nil && *r.machine.Status.Phase == machinev1.PhaseProvisioned {
-		// Check whether a machine replacement condition already exists
-		if machineReplacementCondition := conditionTypeCheck(r.providerStatus.Conditions, ibmcloudproviderv1.MachineReplacement); machineReplacementCondition != nil {
-			// If the replacement condition is already in progress or completed or failed, we will not make a second replacement attempt, only if one was requested by machine isn't deleted (failed API delete call)
-			if machineReplacementCondition.Reason != ibmcloudproviderv1.MachineReplacementRequested {
-				klog.Infof("%s: machine replacement can only triggered once, currenetly in: %s", r.machine.Name, machineReplacementCondition.Reason)
-				return nil
-			}
-		}
-		klog.Infof("%s: checking if machine is past replacement deadline", r.machine.Name)
-		masterMachine := false
-		if r.machine.Labels != nil && r.machine.Labels["machine.openshift.io/cluster-api-machine-role"] == "master" {
-			masterMachine = true
-		}
-		if replacementRequired, err := r.checkMachineDeadline(machineReplaceDeadlineMinutes, newInstance.CreatedAt.String()); (err == nil && replacementRequired) && !masterMachine {
-			// NOTE(cjschaef): If the machine needs to be replaced:
-			// 1. We need to purge Addresses and ProviderID to prevent the machine being marked as Failed, per
-			//    https://github.com/openshift/machine-api-operator/blob/6397450f3464ffb875f43011ed8ad7428e50f881/pkg/controller/machine/controller.go#L348-L362
-			// 2. We add a MachineReplaced ProviderStatus, to track the deletion and replacement of the machine
-			// 3. We delete the machine via IBM Cloud API
-			// Any failure in one of these steps, should result in returning back to this code block to try again (PatchMachine or delete failure)
-			klog.Warningf("%s: attempting to replace stuck machine", r.machine.Name)
-			// Remove the machine's Addresses and ProviderID since we are replacing the machine
-			klog.Infof("%s: clearing machine's previous data for replacement machine", r.machine.Name)
-			r.machine.Status.Addresses = make([]apicorev1.NodeAddress, 0)
-			r.machine.Spec.ProviderID = nil
-			// Attempt to update the machine config with this data purge, to prevent failures
-			if patchErr := r.PatchMachine(); patchErr != nil {
-				return fmt.Errorf("failed to update machine date purge: %q", patchErr)
-			}
-			// Update status that machine is being replaced
-			klog.Infof("%s: updating provider status for replacement requested", r.machine.Name)
-			r.providerStatus.Conditions = reconcileProviderConditions(r.providerStatus.Conditions, ibmcloudproviderv1.IBMCloudMachineProviderCondition{
-				Type:    ibmcloudproviderv1.MachineReplacement,
-				Reason:  ibmcloudproviderv1.MachineReplacementRequested,
-				Message: machineReplacementRequestedMessageCondition,
-				Status:  apicorev1.ConditionTrue,
-			})
-			// Attempt to update the Machine config with this ProviderStatus, to track the machine deletion
-			if patchErr := r.PatchMachine(); patchErr != nil {
-				return fmt.Errorf("failed to update machine with replacement status: %q", patchErr)
-			}
-			// Finally, attempt to delete the stuck machine
-			klog.Infof("%s: deleting machine for replacement", r.machine.Name)
-			deleteErr := r.delete()
-			// Determine whether the deletion attempt was made and successful (not nil and a RequeueAfterError was returned)
-			if _, okay := deleteErr.(*machinecontroller.RequeueAfterError); okay {
-				klog.Infof("%s: machine delete call made successfully, for replacement", r.machine.Name)
-				return deleteErr
-			}
-			return fmt.Errorf("attempt to delete stuck machine failed: %q", deleteErr)
-
-		}
 	}
 
 	// Update Machine Status Addresses
@@ -350,62 +234,123 @@ func (r *Reconciler) reconcileMachineWithCloudState(conditionFailed *ibmcloudpro
 		Status:  apicorev1.ConditionTrue,
 	}
 	r.providerStatus.Conditions = reconcileProviderConditions(r.providerStatus.Conditions, conditionSuccess)
-	// If the machine was being replaced, update the status that the replacement completed
-	if conditionTypeCheck(r.providerStatus.Conditions, ibmcloudproviderv1.MachineReplacement) != nil {
-		r.providerStatus.Conditions = reconcileProviderConditions(r.providerStatus.Conditions, ibmcloudproviderv1.IBMCloudMachineProviderCondition{
-			Type:    ibmcloudproviderv1.MachineReplacement,
-			Reason:  ibmcloudproviderv1.MachineReplacementCompleted,
-			Message: machineReplacementCompletedMessageCondition,
-			Status:  apicorev1.ConditionTrue,
-		})
-	}
-
 	// Update labels & Annotations
 	r.setMachineCloudProviderSpecifics(newInstance)
 
-	// Requeue if status is not Running
-	if *newInstance.Status != ibmStatusRunning {
-		klog.Infof("%s: machine status is %q, requeuing...", r.machine.Name, *newInstance.Status)
+	lifecycleState := ptr.Deref(newInstance.LifecycleState, "")
+	if lifecycleState != ibmLifecycleStateStable {
+		klog.Infof("%s: instance lifecycle state is %q%s", r.machine.Name, lifecycleState, lifecycleReasons(newInstance))
+	}
+
+	// Mark the machine as failed if its instance did not finish provisioning
+	if failureMessage := r.provisioningFailureMessage(newInstance); failureMessage != "" {
+		return r.failMachine(failureMessage)
+	}
+
+	// Mark the machine as failed if its instance did not register a node
+	if failureMessage := r.nodeStartupFailureMessage(newInstance); failureMessage != "" {
+		return r.failMachine(failureMessage)
+	}
+
+	// Requeue if status is not Running, or the instance of a machine that is being provisioned is not stable yet.
+	if *newInstance.Status != ibmStatusRunning || (r.machineProvisioning() && lifecycleState != ibmLifecycleStateStable) {
+		klog.Infof("%s: machine status is %q, lifecycle state is %q, requeuing...", r.machine.Name, *newInstance.Status, lifecycleState)
 		return &machinecontroller.RequeueAfterError{RequeueAfter: requeueAfterSeconds * time.Second}
 	}
 	return nil
 }
 
-// checkMachineDeadline will check whether a deadline has been passed from a RFC3339 formatted start time
-func (r *Reconciler) checkMachineDeadline(deadline time.Duration, startTimeRaw string) (bool, error) {
-	userData, err := r.getUserData()
-	if err != nil {
-		klog.Warningf("%s: failure collecting user data: %v", r.machine.Name, err)
-		return false, err
-	}
-	var ignitionConfig igntypes.Config
-	if err := json.Unmarshal([]byte(userData), &ignitionConfig); err != nil {
-		klog.Warningf("%s: failure attempting to unmarshal UserData: %v", r.machine.Name, err)
-		return false, err
+// provisioningFailureMessage returns a message describing why the instance of a machine that is being provisioned will
+// not become usable, or an empty string if the instance can still finish provisioning. IBM Cloud registers a new
+// instance in the background and withdraws an instance whose registration did not complete, so an instance whose
+// lifecycle state does not become "stable" is lost eventually.
+func (r *Reconciler) provisioningFailureMessage(instance *vpcv1.Instance) string {
+	// An instance that is being deleted is not reported as a failure, the machine is failed by the machine controller
+	// once the instance is gone
+	if !r.machineProvisioning() || ptr.Deref(instance.Status, "") == ibmStatusDeleting {
+		return ""
 	}
 
-	// Only check machines where the Ignition Config requires fetching additional configuration from an Https source
-	if len(ignitionConfig.Ignition.Config.Merge) == 1 && ignitionConfig.Ignition.Config.Merge[0].Source != nil && strings.HasPrefix(*ignitionConfig.Ignition.Config.Merge[0].Source, httpsPrefix) {
-		startTime, err := time.Parse(time.RFC3339, startTimeRaw)
-		if err != nil {
-			klog.Warningf("%s: failure parsing start time for %s minute deadline check: %q", r.machine.Name, deadline, startTimeRaw)
-			return false, err
+	// Only "stable" and "failed" are acted on, every other lifecycle state waits for the deadline, whether it is a
+	// documented state, or one that is added later, as the values of enumerated properties of the API can expand.
+	lifecycleState := ptr.Deref(instance.LifecycleState, "")
+	if lifecycleState == ibmLifecycleStateStable {
+		return ""
+	}
+
+	if lifecycleState != ibmLifecycleStateFailed {
+		if instance.CreatedAt == nil {
+			klog.Warningf("%s: instance has no creation time, cannot check lifecycle state deadline", r.machine.Name)
+			return ""
 		}
-
-		// Calcuclate deadline and current time
-		deadlineTime := startTime.Add(time.Minute * deadline)
-		now := time.Now().UTC()
-
-		// If current time is not before the deadline, it fails the check
-		if !now.Before(deadlineTime) {
-			klog.Infof("%s: machine is past %d minute deadline", r.machine.Name, deadline)
-			return true, nil
+		if time.Now().Before(time.Time(*instance.CreatedAt).Add(machineLifecycleStableDeadlineMinutes * time.Minute)) {
+			return ""
 		}
-		klog.Infof("%s: machine is not past %d minute deadline", r.machine.Name, deadline)
-		return false, nil
+		return fmt.Sprintf("instance lifecycle state is %q, expected %q within %d minutes of the instance creation%s", lifecycleState, ibmLifecycleStateStable, machineLifecycleStableDeadlineMinutes, lifecycleReasons(instance))
 	}
-	klog.Infof("%s: machine ignition config does not require source data", r.machine.Name)
-	return false, nil
+
+	return fmt.Sprintf("instance lifecycle state is %q%s", lifecycleState, lifecycleReasons(instance))
+}
+
+// nodeStartupFailureMessage returns a message describing why the instance of a provisioned machine will not register
+// a node, or an empty string if the node can still be registered. The machine controller keeps a machine without a
+// node in the Provisioned phase indefinitely, so an instance that is stuck while booting is reported here.
+func (r *Reconciler) nodeStartupFailureMessage(instance *vpcv1.Instance) string {
+	// An instance that is being deleted is not reported as a failure, the machine is failed by the machine controller
+	// once the instance is gone
+	if ptr.Deref(r.machine.Status.Phase, "") != machinev1.PhaseProvisioned || r.machine.Status.NodeRef != nil || ptr.Deref(instance.Status, "") == ibmStatusDeleting {
+		return ""
+	}
+
+	if instance.CreatedAt == nil {
+		klog.Warningf("%s: instance has no creation time, cannot check node deadline", r.machine.Name)
+		return ""
+	}
+	if time.Now().Before(time.Time(*instance.CreatedAt).Add(machineNodeDeadlineMinutes * time.Minute)) {
+		return ""
+	}
+
+	return fmt.Sprintf("instance did not register a node within %d minutes of the instance creation, instance status is %q", machineNodeDeadlineMinutes, ptr.Deref(instance.Status, ""))
+}
+
+// failMachine marks the machine as failed, so that it is not mistaken for a machine that can still become usable.
+func (r *Reconciler) failMachine(failureMessage string) error {
+	klog.Errorf("%s: %s", r.machine.Name, failureMessage)
+	// The phase is set here and the error is returned, so that the machine controller persists the failed machine
+	r.machine.Status.Phase = ptr.To(machinev1.PhaseFailed)
+	r.machine.Status.ErrorReason = ptr.To(machinev1.CreateMachineError)
+	r.machine.Status.ErrorMessage = ptr.To(failureMessage)
+
+	return machinecontroller.CreateMachine("%s", failureMessage)
+}
+
+// machineProvisioning returns true if the machine is being provisioned, i.e. its instance was never running with a
+// stable lifecycle state.
+func (r *Reconciler) machineProvisioning() bool {
+	phase := ptr.Deref(r.machine.Status.Phase, "")
+	return phase == "" || phase == machinev1.PhaseProvisioning
+}
+
+// lifecycleReasons returns the reasons for the lifecycle state of the instance, to be appended to a message. Reasons
+// without a code or a message are reported with the part that is set, reasons without either of them are skipped.
+func lifecycleReasons(instance *vpcv1.Instance) string {
+	reasons := make([]string, 0, len(instance.LifecycleReasons))
+	for _, reason := range instance.LifecycleReasons {
+		code, message := ptr.Deref(reason.Code, ""), ptr.Deref(reason.Message, "")
+		switch {
+		case code != "" && message != "":
+			reasons = append(reasons, fmt.Sprintf("%s: %s", code, message))
+		case code != "":
+			reasons = append(reasons, code)
+		case message != "":
+			reasons = append(reasons, message)
+		}
+	}
+	if len(reasons) == 0 {
+		return ""
+	}
+
+	return fmt.Sprintf(": %s", strings.Join(reasons, ", "))
 }
 
 // setMachineCloudProviderSpecifics updates Machine resource labels and Annotations
