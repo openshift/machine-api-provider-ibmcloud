@@ -7,7 +7,6 @@ require (
 	github.com/IBM/platform-services-go-sdk v0.74.0
 	github.com/IBM/vpc-go-sdk v0.78.1
 	github.com/blang/semver v3.5.1+incompatible
-	github.com/coreos/ignition/v2 v2.20.0
 	github.com/go-logr/logr v1.4.3
 	github.com/go-openapi/strfmt v0.25.0
 	github.com/golang-jwt/jwt v3.2.2+incompatible
@@ -38,9 +37,6 @@ require (
 	github.com/blang/semver/v4 v4.0.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/chai2010/gettext-go v1.0.2 // indirect
-	github.com/coreos/go-semver v0.3.1 // indirect
-	github.com/coreos/go-systemd/v22 v22.7.0 // indirect
-	github.com/coreos/vcontext v0.0.0-20230201181013-d72178a18687 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/emicklei/go-restful/v3 v3.13.0 // indirect
 	github.com/evanphx/json-patch/v5 v5.9.11 // indirect
@@ -103,7 +99,6 @@ require (
 	github.com/spf13/afero v1.12.0 // indirect
 	github.com/spf13/cobra v1.10.2 // indirect
 	github.com/spf13/pflag v1.0.10 // indirect
-	github.com/vincent-petithory/dataurl v1.0.0 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	github.com/xlab/treeprint v1.2.0 // indirect
 	go.mongodb.org/mongo-driver v1.17.6 // indirect

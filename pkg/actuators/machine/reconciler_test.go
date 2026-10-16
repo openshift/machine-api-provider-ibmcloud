@@ -463,6 +463,7 @@ func TestReconcileMachineWithCloudState(t *testing.T) {
 // These are the values the IBM Cloud API reports, so they are deliberately not the constants of the provider.
 const (
 	statusDeleting               = "deleting"
+	statusStopped                = "stopped"
 	lifecycleStateStable         = "stable"
 	lifecycleStateFailed         = "failed"
 	lifecycleStatePending        = "pending"
@@ -634,6 +635,164 @@ func TestReconcileMachineWithCloudStateLifecycleState(t *testing.T) {
 				}
 				if r.machine.Status.ErrorMessage != nil {
 					t.Errorf("Expected no error message, got: %s", *r.machine.Status.ErrorMessage)
+				}
+			}
+		})
+	}
+}
+
+func TestReconcileMachineWithCloudStateNodeDeadline(t *testing.T) {
+	pastNodeDeadline := (machineNodeDeadlineMinutes + 1) * time.Minute
+
+	cases := []struct {
+		name          string
+		phase         string
+		status        string
+		hasNode       bool
+		createdAgo    time.Duration
+		expectRequeue bool
+		expectFailed  bool
+	}{
+		{
+			name:          "Provisioned machine without node within deadline does not fail",
+			phase:         machinev1.PhaseProvisioned,
+			createdAgo:    time.Minute,
+			expectRequeue: false,
+			expectFailed:  false,
+		},
+		{
+			name:          "Provisioned machine without node past deadline fails",
+			phase:         machinev1.PhaseProvisioned,
+			createdAgo:    pastNodeDeadline,
+			expectRequeue: false,
+			expectFailed:  true,
+		},
+		{
+			name:          "Provisioned machine without node whose instance is not running past deadline fails",
+			phase:         machinev1.PhaseProvisioned,
+			status:        statusStopped,
+			createdAgo:    pastNodeDeadline,
+			expectRequeue: false,
+			expectFailed:  true,
+		},
+		{
+			name:          "Provisioned machine with node past deadline does not fail",
+			phase:         machinev1.PhaseProvisioned,
+			hasNode:       true,
+			createdAgo:    pastNodeDeadline,
+			expectRequeue: false,
+			expectFailed:  false,
+		},
+		{
+			name:          "Provisioned machine whose instance is being deleted does not fail",
+			phase:         machinev1.PhaseProvisioned,
+			status:        statusDeleting,
+			createdAgo:    pastNodeDeadline,
+			expectRequeue: true,
+			expectFailed:  false,
+		},
+		{
+			name:          "Provisioning machine past deadline does not fail",
+			phase:         machinev1.PhaseProvisioning,
+			createdAgo:    pastNodeDeadline,
+			expectRequeue: false,
+			expectFailed:  false,
+		},
+		{
+			name:          "Running machine past deadline does not fail",
+			phase:         machinev1.PhaseRunning,
+			hasNode:       true,
+			createdAgo:    pastNodeDeadline,
+			expectRequeue: false,
+			expectFailed:  false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			mockCtrl := gomock.NewController(t)
+			mockIBMClient := mockibm.NewMockClient(mockCtrl)
+
+			providerSpec, err := ibmcloudproviderv1.RawExtensionFromProviderSpec(&ibmcloudproviderv1.IBMCloudMachineProviderSpec{})
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			machine := &machinev1.Machine{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-instance-name",
+					Namespace: "test-ns",
+					Labels:    map[string]string{machinev1.MachineClusterIDLabel: "CLUSTERID"},
+				},
+				Spec: machinev1.MachineSpec{
+					ProviderSpec: machinev1.ProviderSpec{
+						Value: providerSpec,
+					},
+				},
+				Status: machinev1.MachineStatus{
+					Phase: &tc.phase,
+				},
+			}
+			if tc.hasNode {
+				machine.Status.NodeRef = &corev1.ObjectReference{Kind: "Node", Name: machine.Name}
+			}
+
+			machineScope, err := newMachineScope(machineScopeParams{
+				machine: machine,
+				client:  controllerfake.NewFakeClient(),
+				ibmClientBuilder: func(coreClient client.Client, secretVal string, providerSpec ibmcloudproviderv1.IBMCloudMachineProviderSpec) (ibmclient.Client, error) {
+					return mockIBMClient, nil
+				},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			instance, err := stubInstanceGetByName(machine.Name, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.status != "" {
+				instance.Status = &tc.status
+			}
+			createdAt := strfmt.DateTime(time.Now().Add(-tc.createdAgo))
+			instance.CreatedAt = &createdAt
+
+			mockIBMClient.EXPECT().GetAccountID().Return("accountID", nil).AnyTimes()
+			mockIBMClient.EXPECT().InstanceGetByName(gomock.Any(), gomock.Any()).Return(instance, nil).AnyTimes()
+
+			r := newReconciler(machineScope)
+			err = r.reconcileMachineWithCloudState(nil)
+
+			var requeueErr *machinecontroller.RequeueAfterError
+			if tc.expectRequeue != errors.As(err, &requeueErr) {
+				t.Errorf("Expected requeue to be %v, got error: %v", tc.expectRequeue, err)
+			}
+
+			phase := ptr.Deref(r.machine.Status.Phase, "")
+			if tc.expectFailed {
+				if phase != machinev1.PhaseFailed {
+					t.Errorf("Expected machine phase %s, got: %s", machinev1.PhaseFailed, phase)
+				}
+				if ptr.Deref(r.machine.Status.ErrorReason, "") != machinev1.CreateMachineError {
+					t.Errorf("Expected error reason %s, got: %v", machinev1.CreateMachineError, r.machine.Status.ErrorReason)
+				}
+				if ptr.Deref(r.machine.Status.ErrorMessage, "") == "" {
+					t.Error("Expected an error message")
+				}
+				var machineErr *machinecontroller.MachineError
+				if !errors.As(err, &machineErr) {
+					t.Errorf("Expected a MachineError, got: %v", err)
+				}
+			} else {
+				if phase == machinev1.PhaseFailed {
+					t.Error("Expected machine not to be failed")
+				}
+				if r.machine.Status.ErrorMessage != nil {
+					t.Errorf("Expected no error message, got: %s", *r.machine.Status.ErrorMessage)
+				}
+				if err != nil && !tc.expectRequeue {
+					t.Errorf("Expected no error, got: %v", err)
 				}
 			}
 		})
