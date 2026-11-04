@@ -62,6 +62,8 @@ const (
 	MachineCreationSucceeded IBMCloudMachineProviderConditionReason = "MachineCreationSucceeded"
 	// MachineCreationFailed indicates machine creation failure.
 	MachineCreationFailed IBMCloudMachineProviderConditionReason = "MachineCreationFailed"
+	// MachineCreationInProgress indicates the machine creation is in progress
+	MachineCreationInProgress IBMCloudMachineProviderConditionReason = "MachineCreationInProgress"
 	// MachineReplacementRequested indicates machine replacement was requested.
 	MachineReplacementRequested IBMCloudMachineProviderConditionReason = "MachineReplacementRequested"
 	// MachineReplacementInProgress indicates the machine replacement is in progress

@@ -9,6 +9,7 @@ require (
 	github.com/blang/semver v3.5.1+incompatible
 	github.com/coreos/ignition/v2 v2.20.0
 	github.com/go-logr/logr v1.4.3
+	github.com/go-openapi/strfmt v0.25.0
 	github.com/golang-jwt/jwt v3.2.2+incompatible
 	github.com/onsi/ginkgo/v2 v2.32.1
 	github.com/onsi/gomega v1.43.0
@@ -53,7 +54,6 @@ require (
 	github.com/go-openapi/errors v0.22.4 // indirect
 	github.com/go-openapi/jsonpointer v1.0.0 // indirect
 	github.com/go-openapi/jsonreference v1.0.0 // indirect
-	github.com/go-openapi/strfmt v0.25.0 // indirect
 	github.com/go-openapi/swag v0.27.1 // indirect
 	github.com/go-openapi/swag/cmdutils v0.27.1 // indirect
 	github.com/go-openapi/swag/conv v0.27.1 // indirect

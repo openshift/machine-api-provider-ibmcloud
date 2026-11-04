@@ -310,6 +310,27 @@ func (r *Reconciler) reconcileMachineWithCloudState(conditionFailed *ibmcloudpro
 		}
 	}
 
+	// The instance of a machine that is being provisioned is not usable until its lifecycle state is stable, so the
+	// machine is not updated from its instance until then.
+	if lifecycleState := ptr.Deref(newInstance.LifecycleState, ""); lifecycleState != vpcv1.InstanceLifecycleStateStableConst {
+		if r.machineProvisioning() {
+			// A failed lifecycle state has its own reason, as the instance is not expected to become stable anymore
+			reason := ibmcloudproviderv1.MachineCreationInProgress
+			if lifecycleState == vpcv1.InstanceLifecycleStateFailedConst {
+				reason = ibmcloudproviderv1.MachineCreationFailed
+			}
+			condition := ibmcloudproviderv1.IBMCloudMachineProviderCondition{
+				Type:    ibmcloudproviderv1.MachineCreated,
+				Reason:  reason,
+				Message: fmt.Sprintf("instance lifecycle state is %q%s", lifecycleState, lifecycleReasons(newInstance)),
+				Status:  apicorev1.ConditionFalse,
+			}
+			r.providerStatus.Conditions = reconcileProviderConditions(r.providerStatus.Conditions, condition)
+			return fmt.Errorf("%s: %w", condition.Message, &machinecontroller.RequeueAfterError{RequeueAfter: requeueAfterSeconds * time.Second})
+		}
+		klog.V(3).Infof("%s: instance lifecycle state is %q%s", r.machine.Name, lifecycleState, lifecycleReasons(newInstance))
+	}
+
 	// Update Machine Status Addresses
 	ipAddr := *newInstance.PrimaryNetworkInterface.PrimaryIP.Address
 	if ipAddr != "" {
@@ -369,6 +390,33 @@ func (r *Reconciler) reconcileMachineWithCloudState(conditionFailed *ibmcloudpro
 		return &machinecontroller.RequeueAfterError{RequeueAfter: requeueAfterSeconds * time.Second}
 	}
 	return nil
+}
+
+// machineProvisioning returns true if the machine is in the Provisioning phase.
+func (r *Reconciler) machineProvisioning() bool {
+	return ptr.Deref(r.machine.Status.Phase, "") == machinev1.PhaseProvisioning
+}
+
+// lifecycleReasons returns the reasons for the lifecycle state of the instance, to be appended to a message. Reasons
+// without a code or a message are reported with the part that is set, reasons without either of them are skipped.
+func lifecycleReasons(instance *vpcv1.Instance) string {
+	reasons := make([]string, 0, len(instance.LifecycleReasons))
+	for _, reason := range instance.LifecycleReasons {
+		code, message := ptr.Deref(reason.Code, ""), ptr.Deref(reason.Message, "")
+		switch {
+		case code != "" && message != "":
+			reasons = append(reasons, fmt.Sprintf("%s: %s", code, message))
+		case code != "":
+			reasons = append(reasons, code)
+		case message != "":
+			reasons = append(reasons, message)
+		}
+	}
+	if len(reasons) == 0 {
+		return ""
+	}
+
+	return fmt.Sprintf(": %s", strings.Join(reasons, ", "))
 }
 
 // checkMachineDeadline will check whether a deadline has been passed from a RFC3339 formatted start time
